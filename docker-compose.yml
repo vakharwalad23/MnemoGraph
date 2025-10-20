@@ -38,19 +38,27 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama_models:/root/.ollama
+      - ollama_data:/root/.ollama
     restart: unless-stopped
+
     # Auto-pull embedding model on startup
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        /bin/ollama serve &
-        sleep 5
-        ollama pull nomic-embed-text
-        wait
+
+  ollama-setup:
+    image: ollama/ollama:latest
+    depends_on:
+      - ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: >
+      /bin/bash -c "
+      sleep 30 &&
+      ollama pull nomic-embed-text
+      "
 
 volumes:
   qdrant_storage:
   neo4j_data:
   neo4j_logs:
-  ollama_models:
+  ollama_data:
