@@ -66,6 +66,11 @@ class TemporalRelationshipEngine:
             True if memory is new
         """
         now = datetime.now(timezone.utc)
+
+        # Ensure created_at is timezone-aware
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+
         age = now - created_at
         
         is_new = age <= timedelta(hours=self.new_memory_window_hours)
@@ -97,6 +102,10 @@ class TemporalRelationshipEngine:
             Dictionary with decay score and expiring status
         """
         now = datetime.now(timezone.utc)
+
+        # Ensure created_at is timezone-aware
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
         
         # Calculate age-based decay
         age_days = (now - created_at).total_seconds() / (24 * 3600)
@@ -104,11 +113,16 @@ class TemporalRelationshipEngine:
         
         # Calculate recency decay (time since last access)
         if last_accessed:
+            # Ensure last_accessed is timezone-aware
+            if last_accessed.tzinfo is None:
+                last_accessed = last_accessed.replace(tzinfo=timezone.utc)
+                
             days_since_access = (now - last_accessed).total_seconds() / (24 * 3600)
             recency_decay = self._exponential_decay(days_since_access)
         else:
             # Never accessed = same as age decay
             recency_decay = age_decay
+            days_since_access = age_days
         
         # Calculate consolidation factor (resistance to forgetting)
         # More accesses = stronger memory
@@ -131,7 +145,7 @@ class TemporalRelationshipEngine:
             "is_expiring": is_expiring,
             "is_forgotten": is_forgotten,
             "age_days": age_days,
-            "days_since_access": days_since_access if last_accessed else age_days,
+            "days_since_access": days_since_access,
             "access_count": access_count,
             "consolidation_strength": 1.0 - consolidation
         }
@@ -175,6 +189,11 @@ class TemporalRelationshipEngine:
         Returns:
             List of older memories that this one updates
         """
+
+        # Ensure created_at is timezone-aware
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+
         # Search for similar memories
         similar_memories = await self.vector_store.search_similar(
             query_vector=embedding,
@@ -438,9 +457,17 @@ class TemporalRelationshipEngine:
             Relevance score (0-1, higher is more relevant)
         """
         now = datetime.now(timezone.utc)
+
+        # Ensure timezone-aware
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
         
         # Recency score
         if last_accessed:
+            # Ensure last_accessed is timezone-aware
+            if last_accessed.tzinfo is None:
+                last_accessed = last_accessed.replace(tzinfo=timezone.utc)
+
             hours_since_access = (now - last_accessed).total_seconds() / 3600
         else:
             hours_since_access = (now - created_at).total_seconds() / 3600
