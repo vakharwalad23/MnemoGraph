@@ -50,7 +50,7 @@ class TemporalConfig(BaseModel):
     """Temporal relationship configuration."""
     
     new_memory_window_hours: int = 48
-    update_similarity_threshold: float = 0.85
+    update_similarity_threshold: float = 0.65
     update_time_window_days: int = 7
     decay_half_life_days: int = 30
     expiring_threshold_days: int = 30
