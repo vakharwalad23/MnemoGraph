@@ -13,6 +13,7 @@ dependencies = [
     "scikit-learn",
     "httpx",
     "ollama",
+    "spacy",
 ]
 
 [tool.uv]

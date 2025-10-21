@@ -166,7 +166,7 @@ class Neo4jGraphStore(GraphStore):
             type_filter = " OR ".join([f"type(r) = '{et.value.upper()}'" for et in edge_types])
             query += f" AND ({type_filter})"
         
-        query += " RETURN neighbor, type(r) as edge_type, r.weight as weight, r.id as edge_id"
+        query += " RETURN neighbor, type(r) as edge_type, r.weight as weight, r.id as edge_id, r.metadata as metadata"
         
         async with driver.session() as session:
             result = await session.run(query, {"node_id": node_id})
@@ -188,7 +188,8 @@ class Neo4jGraphStore(GraphStore):
                     ),
                     "edge_type": RelationshipType(record["edge_type"].lower()),
                     "edge_weight": record["weight"],
-                    "edge_id": record["edge_id"]
+                    "edge_id": record["edge_id"],
+                    "edge_metadata": ast.literal_eval(record["metadata"]) if record["metadata"] else None
                 })
             
             return neighbors

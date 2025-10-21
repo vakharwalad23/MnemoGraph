@@ -170,7 +170,7 @@ class SQLiteGraphStore(GraphStore):
         
         if direction == "outgoing":
             query = """
-                SELECT n.*, e.type as edge_type, e.weight, e.id as edge_id
+                SELECT n.*, e.type as edge_type, e.weight, e.id as edge_id, e.metadata as edge_metadata
                 FROM edges e
                 JOIN nodes n ON e.target = n.id
                 WHERE e.source = ?
@@ -178,7 +178,7 @@ class SQLiteGraphStore(GraphStore):
             params = [node_id]
         elif direction == "incoming":
             query = """
-                SELECT n.*, e.type as edge_type, e.weight, e.id as edge_id
+                SELECT n.*, e.type as edge_type, e.weight, e.id as edge_id, e.metadata as edge_metadata
                 FROM edges e
                 JOIN nodes n ON e.source = n.id
                 WHERE e.target = ?
@@ -186,7 +186,7 @@ class SQLiteGraphStore(GraphStore):
             params = [node_id]
         else:  # both
             query = """
-                SELECT n.*, e.type as edge_type, e.weight, e.id as edge_id
+                SELECT n.*, e.type as edge_type, e.weight, e.id as edge_id, e.metadata as edge_metadata
                 FROM edges e
                 JOIN nodes n ON (e.target = n.id OR e.source = n.id)
                 WHERE (e.source = ? OR e.target = ?) AND n.id != ?
@@ -215,7 +215,8 @@ class SQLiteGraphStore(GraphStore):
                     ),
                     "edge_type": RelationshipType(row["edge_type"]),
                     "edge_weight": row["weight"],
-                    "edge_id": row["edge_id"]
+                    "edge_id": row["edge_id"],
+                    "edge_metadata": json.loads(row["edge_metadata"]) if row["edge_metadata"] else None
                 }
                 for row in rows
             ]
