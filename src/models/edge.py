@@ -27,9 +27,10 @@ class RelationshipType(str, Enum):
     CO_OCCURS = "co_occurs"
     
     # Causal/Sequential
-    CAUSES = "causes"
+    # FOLLOWS = "follows"
     REQUIRES = "requires"
-    PRECEDES = "precedes"
+    CAUSES = "causes"
+    LEADS_TO = "leads_to"
 
 
 class Edge(BaseModel):
