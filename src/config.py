@@ -59,17 +59,17 @@ class TemporalConfig(BaseModel):
 class HierarchicalConfig(BaseModel):
     """Hierarchical relationship configuration."""
     
-    min_cluster_size: int = 3
-    num_topics: int = 5
-    abstraction_threshold: float = 0.7
+    min_cluster_size: int = 2
+    num_topics: int = 3
+    abstraction_threshold: float = 0.6
 
 
 class CooccurrenceConfig(BaseModel):
     """Entity co-occurrence configuration."""
     
-    min_entity_length: int = 3
-    min_cooccurrence_count: int = 2
-    entity_weight_threshold: float = 0.3
+    min_entity_length: int = 2
+    min_cooccurrence_count: int = 1
+    entity_weight_threshold: float = 0.1
     use_spacy: bool = True
 
 
