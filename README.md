@@ -389,6 +389,49 @@ Typical response times with Ollama embeddings:
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+### 🐛 Known Issues & Improvement Areas
+
+This is a **Proof of Concept (PoC)** and there are known areas that need improvement:
+
+#### Relationship Engine Issues
+
+1. **Hierarchical Clustering**
+
+   - Topic clustering may not trigger with small datasets (< 5 memories)
+   - Abstraction level detection needs refinement
+   - K-means clustering could be replaced with more adaptive algorithms
+
+2. **Entity Co-occurrence**
+
+   - spaCy dependency adds overhead; consider lighter NER models
+   - Entity extraction misses domain-specific terms
+   - Co-occurrence weights could be more sophisticated
+
+3. **Temporal Relationships**
+
+   - Update detection threshold may need per-domain tuning
+   - Time windows are fixed; could benefit from adaptive windowing
+   - Decay model is simplified; real forgetting curves are more complex
+
+4. **Semantic Similarity**
+
+   - Threshold (0.5) works for general use but may need domain tuning
+   - No negative example filtering
+   - Could benefit from learned similarity metrics
+
+5. **General**
+   - Relationship inference happens sequentially; could be parallelized
+   - No conflict resolution when multiple engines suggest different relationships
+   - Missing relationship confidence scores
+
+**Want to help?** Pick any of these issues and submit a PR! We especially welcome:
+
+- Performance optimizations
+- Better algorithm implementations
+- Additional relationship types
+- Improved configuration auto-tuning
+- Bug fixes and test improvements
+
 ### Development Setup
 
 ```bash
