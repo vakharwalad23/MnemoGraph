@@ -1,8 +1,8 @@
 """Pluggable embedding providers."""
 
 from .base import EmbeddingProvider
-from .ollama import OllamaEmbedding
 from .factory import create_embedding_provider
+from .ollama import OllamaEmbedding
 
 __all__ = [
     "EmbeddingProvider",

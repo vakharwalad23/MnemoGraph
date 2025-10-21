@@ -1,10 +1,10 @@
 """Relationship inference engines."""
 
+from .causal import CausalSequentialEngine
+from .cooccurrence import EntityCooccurrenceEngine
+from .hierarchical import HierarchicalRelationshipEngine
 from .semantic import SemanticSimilarityEngine
 from .temporal import TemporalRelationshipEngine
-from .hierarchical import HierarchicalRelationshipEngine
-from .cooccurrence import EntityCooccurrenceEngine
-from .causal import CausalSequentialEngine
 
 __all__ = [
     "SemanticSimilarityEngine",

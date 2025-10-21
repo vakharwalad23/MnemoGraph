@@ -1,13 +1,14 @@
 """Ollama embedding provider using official Ollama SDK."""
 
-from typing import List, Optional
+
 import ollama
+
 from .base import EmbeddingProvider
 
 
 class OllamaEmbedding(EmbeddingProvider):
     """Ollama-based embedding provider using official SDK."""
-    
+
     def __init__(
         self,
         model: str = "nomic-embed-text",
@@ -15,64 +16,58 @@ class OllamaEmbedding(EmbeddingProvider):
     ):
         """
         Initialize Ollama embedding provider.
-        
+
         Args:
             model: Name of the Ollama model to use
             host: Host URL of the Ollama service
         """
         self.model = model
         self.host = host
-        self._dimension: Optional[int] = None
+        self._dimension: int | None = None
         # Initialize client with custom host
         self.client = ollama.Client(host=host)
-    
-    async def embed(self, text: str) -> List[float]:
+
+    async def embed(self, text: str) -> list[float]:
         """
         Generate embedding for a single text.
-        
+
         Args:
             text: Input text to embed
-            
+
         Returns:
             Embedding vector as list of floats
         """
-        response = self.client.embeddings(
-            model=self.model,
-            prompt=text
-        )
+        response = self.client.embeddings(model=self.model, prompt=text)
         embedding = response["embedding"]
-        
+
         # Cache dimension
         if self._dimension is None:
             self._dimension = len(embedding)
-        
+
         return embedding
-    
-    async def embed_batch(self, texts: List[str]) -> List[List[float]]:
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """
         Generate embeddings for multiple texts.
-        
+
         Args:
             texts: List of input texts to embed
-            
+
         Returns:
             List of embedding vectors
         """
         embeddings = []
         for text in texts:
-            response = self.client.embeddings(
-                model=self.model,
-                prompt=text
-            )
+            response = self.client.embeddings(model=self.model, prompt=text)
             embedding = response["embedding"]
             embeddings.append(embedding)
-            
+
             # Cache dimension from first embedding
             if self._dimension is None and embedding:
                 self._dimension = len(embedding)
-        
+
         return embeddings
-    
+
     @property
     def dimension(self) -> int:
         """Return the dimension of the embedding vectors."""

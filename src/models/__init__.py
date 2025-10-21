@@ -1,7 +1,7 @@
 """Data models for MnemoGraph."""
 
-from .memory import Memory, MemoryStatus, Document, Chunk
 from .edge import Edge, RelationshipType
+from .memory import Chunk, Document, Memory, MemoryStatus
 from .node import Node, NodeType
 
 __all__ = [

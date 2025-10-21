@@ -1,16 +1,18 @@
 """Graph node models."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, Optional
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any
 from uuid import uuid4
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from .memory import MemoryStatus
 
 
 class NodeType(str, Enum):
     """Types of nodes in the graph."""
+
     MEMORY = "memory"
     DOCUMENT = "document"
     CHUNK = "chunk"
@@ -19,19 +21,17 @@ class NodeType(str, Enum):
 
 class Node(BaseModel):
     """Generic graph node representation."""
-    
-    model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat()}
-    )
-    
+
+    model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()})
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     type: NodeType
-    data: Dict[str, Any] = Field(default_factory=dict)
-    
+    data: dict[str, Any] = Field(default_factory=dict)
+
     # Status tracking
     status: MemoryStatus = MemoryStatus.NEW
-    
+
     # Temporal metadata
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_accessed: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_accessed: datetime | None = None
     access_count: int = 0
