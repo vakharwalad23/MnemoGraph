@@ -1,16 +1,26 @@
-"""Data models for MnemoGraph."""
+"""
+Data models for MnemoGraph.
 
-from .edge import Edge, RelationshipType
-from .memory import Chunk, Document, Memory, MemoryStatus
-from .node import Node, NodeType
+Core models:
+- Memory: Main memory node with versioning
+- NodeType, MemoryStatus: Enums for memory lifecycle
+- VersionChain, MemoryEvolution: Version tracking
+- InvalidationResult: Invalidation check results
+"""
+from src.models.memory import Memory, MemoryStatus, NodeType
+from src.models.version import (
+    InvalidationResult,
+    MemoryEvolution,
+    VersionChange,
+    VersionChain,
+)
 
 __all__ = [
     "Memory",
-    "MemoryStatus",
-    "Document",
-    "Chunk",
-    "Edge",
-    "RelationshipType",
-    "Node",
     "NodeType",
+    "MemoryStatus",
+    "MemoryEvolution",
+    "VersionChange",
+    "VersionChain",
+    "InvalidationResult",
 ]
