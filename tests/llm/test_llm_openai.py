@@ -25,6 +25,7 @@ def openai_llm():
     )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 class TestOpenAILLM:
     """Test OpenAI LLM provider."""

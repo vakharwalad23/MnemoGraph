@@ -16,6 +16,10 @@ class MockLLM(LLMProvider):
             return response_format(answer="test", confidence=0.9)
         return "test response"
 
+    async def close(self):
+        """Mock close implementation."""
+        pass
+
 
 class TestResponse(BaseModel):
     """Test response model."""
@@ -23,6 +27,7 @@ class TestResponse(BaseModel):
     confidence: float
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 class TestLLMProviderBase:
     """Test base LLM provider functionality."""

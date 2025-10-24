@@ -212,13 +212,9 @@ class SQLiteGraphStore(GraphStore):
                         type=NodeType(row["type"]),
                         data=json.loads(row["data"]),
                         status=MemoryStatus(row["status"]),
-                        created_at=datetime.fromisoformat(row["created_at"]).replace(
-                            tzinfo=UTC
-                        ),
+                        created_at=datetime.fromisoformat(row["created_at"]).replace(tzinfo=UTC),
                         last_accessed=(
-                            datetime.fromisoformat(row["last_accessed"]).replace(
-                                tzinfo=UTC
-                            )
+                            datetime.fromisoformat(row["last_accessed"]).replace(tzinfo=UTC)
                             if row["last_accessed"]
                             else None
                         ),
@@ -271,9 +267,7 @@ class SQLiteGraphStore(GraphStore):
         """Mark a node as forgotten."""
         await self.update_node_status(node_id, MemoryStatus.FORGOTTEN)
 
-    async def find_path(
-        self, start_id: str, end_id: str, max_depth: int = 3
-    ) -> list[str] | None:
+    async def find_path(self, start_id: str, end_id: str, max_depth: int = 3) -> list[str] | None:
         """Find path between two nodes using BFS."""
         conn = await self._get_connection()
 

@@ -138,9 +138,7 @@ class GraphStore(ABC):
         pass
 
     @abstractmethod
-    async def find_path(
-        self, start_id: str, end_id: str, max_depth: int = 3
-    ) -> list[str] | None:
+    async def find_path(self, start_id: str, end_id: str, max_depth: int = 3) -> list[str] | None:
         """
         Find path between two nodes.
 

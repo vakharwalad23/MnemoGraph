@@ -18,6 +18,7 @@ def ollama_embedder():
     )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 class TestOllamaEmbedder:
     """Test Ollama embedder."""

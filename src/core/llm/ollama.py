@@ -1,6 +1,7 @@
 """
 Ollama LLM provider using native ollama-python SDK.
 """
+
 import json
 
 import ollama
@@ -12,20 +13,17 @@ from src.core.llm.base import LLMProvider
 class OllamaLLM(LLMProvider):
     """
     Ollama LLM provider for text generation.
-    
+
     Uses native ollama-python SDK for chat completions
     with JSON mode for structured outputs.
     """
 
     def __init__(
-        self,
-        host: str = "http://localhost:11434",
-        model: str = "llama3.1",
-        timeout: float = 120.0
+        self, host: str = "http://localhost:11434", model: str = "llama3.1", timeout: float = 120.0
     ):
         """
         Initialize Ollama LLM provider.
-        
+
         Args:
             host: Ollama server URL
             model: Model name for text generation (e.g., "llama3.1", "mistral")
@@ -44,30 +42,30 @@ class OllamaLLM(LLMProvider):
         response_format: type[BaseModel] | None = None,
         max_tokens: int = 2000,
         temperature: float = 0.0,
-        **kwargs
+        **kwargs,
     ) -> BaseModel | str:
         """
         Generate completion using Ollama.
-        
+
         Supports structured output via JSON mode and schema validation.
-        
+
         Args:
             prompt: Input prompt
             response_format: Optional Pydantic model for structured JSON output
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature
             **kwargs: Additional options (passed to Ollama)
-        
+
         Returns:
             Pydantic model if response_format provided, else string
-        
+
         Raises:
             ValueError: If structured output parsing fails
         """
         options = {
             "temperature": temperature,
             "num_predict": max_tokens,
-            **kwargs.get("options", {})
+            **kwargs.get("options", {}),
         }
 
         # Handle structured output
@@ -100,7 +98,7 @@ Requirements:
             messages=messages,
             format=format_type,
             options=options,
-            **{k: v for k, v in kwargs.items() if k != "options"}
+            **{k: v for k, v in kwargs.items() if k != "options"},
         )
 
         content = response["message"]["content"]
@@ -116,17 +114,17 @@ Requirements:
                     f"Failed to parse structured output: {e}\n"
                     f"Raw response: {content}\n"
                     f"Expected schema: {response_format.model_json_schema()}"
-                )
+                ) from e
 
         return content
 
     def _extract_json(self, content: str) -> str:
         """
         Extract JSON from content that might have markdown formatting.
-        
+
         Args:
             content: Raw content that may contain JSON
-            
+
         Returns:
             Cleaned JSON string
         """
@@ -143,4 +141,3 @@ Requirements:
     async def close(self):
         """Close client (Ollama SDK handles cleanup internally)."""
         pass
-

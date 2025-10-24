@@ -157,7 +157,7 @@ class MemoryEngine:
             result["engines_run"] = stats["engines_run"]
 
             logger.info(
-                f"Added memory {memory_id} with " f"{stats['relationships_created']} relationships"
+                f"Added memory {memory_id} with {stats['relationships_created']} relationships"
             )
         else:
             logger.info(f"Added memory {memory_id} (no automatic relationships)")
@@ -351,7 +351,7 @@ class MemoryEngine:
             # (graph store should handle this automatically)
             await self.graph_store.delete_node(memory_id)
 
-        logger.info(f"Deleted memory {memory_id} " f"(removed {relationship_count} relationships)")
+        logger.info(f"Deleted memory {memory_id} (removed {relationship_count} relationships)")
 
         return {
             "memory_id": memory_id,

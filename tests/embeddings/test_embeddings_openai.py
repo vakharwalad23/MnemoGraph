@@ -18,6 +18,7 @@ def openai_embedder():
     )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 class TestOpenAIEmbedder:
     """Test OpenAI embedder."""

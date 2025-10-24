@@ -12,6 +12,18 @@ wheels/
 # Environment variables
 .env
 
+# Test files
+tests/__pycache__/
+tests/*.pyc
+
+# Coverage files
+.coverage
+coverage.xml
+htmlcov/
+
+# Pytest cache
+.pytest_cache/
+
 # SQLite databases
 *.db
 *.sqlite

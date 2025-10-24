@@ -165,8 +165,7 @@ class RelationshipOrchestrator:
         await asyncio.gather(*tasks, return_exceptions=True)
 
         logger.info(
-            f"Processed memory {memory_id}: "
-            f"{stats['relationships_created']} relationships created"
+            f"Processed memory {memory_id}: {stats['relationships_created']} relationships created"
         )
 
         return stats
@@ -345,7 +344,7 @@ class RelationshipOrchestrator:
                 total_stats["batches_processed"] += 1
 
             except Exception as e:
-                logger.error(f"Batch processing failed for batch {i//batch_size}: {e}")
+                logger.error(f"Batch processing failed for batch {i // batch_size}: {e}")
 
         logger.info(
             f"Batch processing complete: {total_stats['total_relationships']} "

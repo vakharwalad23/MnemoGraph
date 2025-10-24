@@ -14,7 +14,12 @@ class MockEmbedder(Embedder):
         # Return fixed-size embedding based on text length
         return [0.1, 0.2, 0.3, 0.4, 0.5]
 
+    async def close(self):
+        """Mock close implementation."""
+        pass
 
+
+@pytest.mark.unit
 @pytest.mark.asyncio
 class TestEmbedderBase:
     """Test base Embedder functionality."""

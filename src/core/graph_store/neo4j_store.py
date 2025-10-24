@@ -138,9 +138,7 @@ class Neo4jGraphStore(GraphStore):
                 type=NodeType(node_data["type"]),
                 data=ast.literal_eval(node_data["data"]),
                 status=MemoryStatus(node_data["status"]),
-                created_at=datetime.fromisoformat(node_data["created_at"]).replace(
-                    tzinfo=UTC
-                ),
+                created_at=datetime.fromisoformat(node_data["created_at"]).replace(tzinfo=UTC),
                 last_accessed=(
                     datetime.fromisoformat(node_data["last_accessed"])
                     if node_data.get("last_accessed")
@@ -254,9 +252,7 @@ class Neo4jGraphStore(GraphStore):
         """Mark a node as forgotten."""
         await self.update_node_status(node_id, MemoryStatus.FORGOTTEN)
 
-    async def find_path(
-        self, start_id: str, end_id: str, max_depth: int = 3
-    ) -> list[str] | None:
+    async def find_path(self, start_id: str, end_id: str, max_depth: int = 3) -> list[str] | None:
         """Find path between two nodes."""
         driver = await self._get_driver()
 

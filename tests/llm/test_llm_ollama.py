@@ -21,11 +21,12 @@ def ollama_llm():
     """Create Ollama LLM for testing."""
     return OllamaLLM(
         host="http://localhost:11434",
-        model="llama3.1",
+        model="llama3.1:8b",
         timeout=120.0
     )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 class TestOllamaLLM:
     """Test Ollama LLM provider."""
@@ -33,7 +34,7 @@ class TestOllamaLLM:
     async def test_initialization(self, ollama_llm):
         """Test provider initialization."""
         assert ollama_llm.host == "http://localhost:11434"
-        assert ollama_llm.model == "llama3.1"
+        assert ollama_llm.model == "llama3.1:8b"
         assert ollama_llm.timeout == 120.0
         assert ollama_llm.client is not None
 
@@ -206,7 +207,7 @@ class TestOllamaLLMIntegration:
 
     async def test_real_completion(self):
         """Test real completion with Ollama."""
-        llm = OllamaLLM(model="llama3.1")
+        llm = OllamaLLM(model="llama3.1:8b")
 
         try:
             result = await llm.complete(
@@ -223,7 +224,7 @@ class TestOllamaLLMIntegration:
 
     async def test_real_structured_output(self):
         """Test real structured output with Ollama."""
-        llm = OllamaLLM(model="llama3.1")
+        llm = OllamaLLM(model="llama3.1:8b")
 
         class YesNo(BaseModel):
             answer: str

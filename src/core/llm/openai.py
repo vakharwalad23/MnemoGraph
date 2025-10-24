@@ -11,7 +11,7 @@ from src.core.llm.base import LLMProvider
 class OpenAILLM(LLMProvider):
     """
     OpenAI LLM provider for text generation.
-    
+
     Uses official OpenAI SDK with native structured output support.
     """
 
@@ -21,11 +21,11 @@ class OpenAILLM(LLMProvider):
         model: str = "gpt-4o",
         organization: str | None = None,
         base_url: str | None = None,
-        timeout: float = 120.0
+        timeout: float = 120.0,
     ):
         """
         Initialize OpenAI LLM provider.
-        
+
         Args:
             api_key: OpenAI API key
             model: Model name (e.g., "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo")
@@ -36,10 +36,7 @@ class OpenAILLM(LLMProvider):
         self.model = model
 
         self.client = AsyncOpenAI(
-            api_key=api_key,
-            organization=organization,
-            base_url=base_url,
-            timeout=timeout
+            api_key=api_key, organization=organization, base_url=base_url, timeout=timeout
         )
 
     async def complete(
@@ -48,20 +45,20 @@ class OpenAILLM(LLMProvider):
         response_format: type[BaseModel] | None = None,
         max_tokens: int = 2000,
         temperature: float = 0.0,
-        **kwargs
+        **kwargs,
     ) -> BaseModel | str:
         """
         Generate completion using OpenAI.
-        
+
         Uses native structured outputs (Parse API) when response_format is provided.
-        
+
         Args:
             prompt: Input prompt
             response_format: Optional Pydantic model for structured output
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature
             **kwargs: Additional parameters (e.g., stop, presence_penalty)
-        
+
         Returns:
             Pydantic model if response_format provided, else string
         """
@@ -72,15 +69,14 @@ class OpenAILLM(LLMProvider):
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            **kwargs
+            **kwargs,
         }
 
         # Use structured outputs if response format provided
         if response_format:
             # OpenAI's native structured output support (Parse API)
             response = await self.client.beta.chat.completions.parse(
-                **params,
-                response_format=response_format
+                **params, response_format=response_format
             )
 
             return response.choices[0].message.parsed
@@ -92,4 +88,3 @@ class OpenAILLM(LLMProvider):
     async def close(self):
         """Close OpenAI client."""
         await self.client.close()
-
