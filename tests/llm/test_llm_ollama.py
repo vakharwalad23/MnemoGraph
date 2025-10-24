@@ -1,6 +1,7 @@
 """
 Tests for Ollama LLM provider.
 """
+
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,6 +12,7 @@ from src.core.llm.ollama import OllamaLLM
 
 class SimpleResponse(BaseModel):
     """Test response model."""
+
     answer: str
     confidence: float
     reasoning: str
@@ -19,11 +21,7 @@ class SimpleResponse(BaseModel):
 @pytest.fixture
 def ollama_llm():
     """Create Ollama LLM for testing."""
-    return OllamaLLM(
-        host="http://localhost:11434",
-        model="llama3.1:8b",
-        timeout=120.0
-    )
+    return OllamaLLM(host="http://localhost:11434", model="llama3.1:8b", timeout=120.0)
 
 
 @pytest.mark.unit
@@ -40,15 +38,10 @@ class TestOllamaLLM:
 
     async def test_complete_simple(self, ollama_llm):
         """Test simple text completion."""
-        with patch.object(ollama_llm.client, 'chat', new_callable=AsyncMock) as mock_chat:
-            mock_chat.return_value = {
-                "message": {"content": "Paris is the capital"}
-            }
+        with patch.object(ollama_llm.client, "chat", new_callable=AsyncMock) as mock_chat:
+            mock_chat.return_value = {"message": {"content": "Paris is the capital"}}
 
-            result = await ollama_llm.complete(
-                "What is the capital of France?",
-                max_tokens=50
-            )
+            result = await ollama_llm.complete("What is the capital of France?", max_tokens=50)
 
             assert isinstance(result, str)
             assert result == "Paris is the capital"
@@ -56,16 +49,10 @@ class TestOllamaLLM:
 
     async def test_complete_with_temperature(self, ollama_llm):
         """Test completion with custom temperature."""
-        with patch.object(ollama_llm.client, 'chat', new_callable=AsyncMock) as mock_chat:
-            mock_chat.return_value = {
-                "message": {"content": "test"}
-            }
+        with patch.object(ollama_llm.client, "chat", new_callable=AsyncMock) as mock_chat:
+            mock_chat.return_value = {"message": {"content": "test"}}
 
-            await ollama_llm.complete(
-                "test",
-                temperature=0.7,
-                max_tokens=100
-            )
+            await ollama_llm.complete("test", temperature=0.7, max_tokens=100)
 
             call_args = mock_chat.call_args
             assert call_args.kwargs["options"]["temperature"] == 0.7
@@ -73,15 +60,10 @@ class TestOllamaLLM:
 
     async def test_complete_with_extra_options(self, ollama_llm):
         """Test completion with extra options."""
-        with patch.object(ollama_llm.client, 'chat', new_callable=AsyncMock) as mock_chat:
-            mock_chat.return_value = {
-                "message": {"content": "test"}
-            }
+        with patch.object(ollama_llm.client, "chat", new_callable=AsyncMock) as mock_chat:
+            mock_chat.return_value = {"message": {"content": "test"}}
 
-            await ollama_llm.complete(
-                "test",
-                options={"top_p": 0.9, "top_k": 40}
-            )
+            await ollama_llm.complete("test", options={"top_p": 0.9, "top_k": 40})
 
             call_args = mock_chat.call_args
             assert call_args.kwargs["options"]["top_p"] == 0.9
@@ -91,15 +73,10 @@ class TestOllamaLLM:
         """Test structured output completion."""
         json_response = '{"answer": "yes", "confidence": 0.95, "reasoning": "because"}'
 
-        with patch.object(ollama_llm.client, 'chat', new_callable=AsyncMock) as mock_chat:
-            mock_chat.return_value = {
-                "message": {"content": json_response}
-            }
+        with patch.object(ollama_llm.client, "chat", new_callable=AsyncMock) as mock_chat:
+            mock_chat.return_value = {"message": {"content": json_response}}
 
-            result = await ollama_llm.complete(
-                "Is Python good?",
-                response_format=SimpleResponse
-            )
+            result = await ollama_llm.complete("Is Python good?", response_format=SimpleResponse)
 
             assert isinstance(result, SimpleResponse)
             assert result.answer == "yes"
@@ -114,15 +91,10 @@ class TestOllamaLLM:
         """Test structured output with markdown code blocks."""
         json_response = '```json\n{"answer": "yes", "confidence": 0.9, "reasoning": "test"}\n```'
 
-        with patch.object(ollama_llm.client, 'chat', new_callable=AsyncMock) as mock_chat:
-            mock_chat.return_value = {
-                "message": {"content": json_response}
-            }
+        with patch.object(ollama_llm.client, "chat", new_callable=AsyncMock) as mock_chat:
+            mock_chat.return_value = {"message": {"content": json_response}}
 
-            result = await ollama_llm.complete(
-                "test",
-                response_format=SimpleResponse
-            )
+            result = await ollama_llm.complete("test", response_format=SimpleResponse)
 
             assert isinstance(result, SimpleResponse)
             assert result.answer == "yes"
@@ -131,45 +103,30 @@ class TestOllamaLLM:
         """Test structured output with generic code blocks."""
         json_response = '```\n{"answer": "yes", "confidence": 0.9, "reasoning": "test"}\n```'
 
-        with patch.object(ollama_llm.client, 'chat', new_callable=AsyncMock) as mock_chat:
-            mock_chat.return_value = {
-                "message": {"content": json_response}
-            }
+        with patch.object(ollama_llm.client, "chat", new_callable=AsyncMock) as mock_chat:
+            mock_chat.return_value = {"message": {"content": json_response}}
 
-            result = await ollama_llm.complete(
-                "test",
-                response_format=SimpleResponse
-            )
+            result = await ollama_llm.complete("test", response_format=SimpleResponse)
 
             assert isinstance(result, SimpleResponse)
 
     async def test_complete_structured_invalid_json(self, ollama_llm):
         """Test structured output with invalid JSON."""
-        with patch.object(ollama_llm.client, 'chat', new_callable=AsyncMock) as mock_chat:
-            mock_chat.return_value = {
-                "message": {"content": "not json at all"}
-            }
+        with patch.object(ollama_llm.client, "chat", new_callable=AsyncMock) as mock_chat:
+            mock_chat.return_value = {"message": {"content": "not json at all"}}
 
             with pytest.raises(ValueError, match="Failed to parse structured output"):
-                await ollama_llm.complete(
-                    "test",
-                    response_format=SimpleResponse
-                )
+                await ollama_llm.complete("test", response_format=SimpleResponse)
 
     async def test_complete_structured_missing_fields(self, ollama_llm):
         """Test structured output with missing required fields."""
         json_response = '{"answer": "yes"}'  # Missing confidence and reasoning
 
-        with patch.object(ollama_llm.client, 'chat', new_callable=AsyncMock) as mock_chat:
-            mock_chat.return_value = {
-                "message": {"content": json_response}
-            }
+        with patch.object(ollama_llm.client, "chat", new_callable=AsyncMock) as mock_chat:
+            mock_chat.return_value = {"message": {"content": json_response}}
 
             with pytest.raises(ValueError):
-                await ollama_llm.complete(
-                    "test",
-                    response_format=SimpleResponse
-                )
+                await ollama_llm.complete("test", response_format=SimpleResponse)
 
     async def test_extract_json_clean(self, ollama_llm):
         """Test JSON extraction from clean input."""
@@ -211,9 +168,7 @@ class TestOllamaLLMIntegration:
 
         try:
             result = await llm.complete(
-                "Say 'Hello' and nothing else",
-                max_tokens=10,
-                temperature=0.0
+                "Say 'Hello' and nothing else", max_tokens=10, temperature=0.0
             )
             assert isinstance(result, str)
             assert len(result) > 0
@@ -232,9 +187,7 @@ class TestOllamaLLMIntegration:
 
         try:
             result = await llm.complete(
-                "Is 2+2=4? Answer yes or no",
-                response_format=YesNo,
-                temperature=0.0
+                "Is 2+2=4? Answer yes or no", response_format=YesNo, temperature=0.0
             )
             assert isinstance(result, YesNo)
             assert result.answer in ["yes", "Yes", "YES"]
@@ -243,4 +196,3 @@ class TestOllamaLLMIntegration:
             pytest.skip(f"Ollama not available: {e}")
         finally:
             await llm.close()
-

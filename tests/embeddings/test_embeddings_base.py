@@ -66,4 +66,3 @@ class TestEmbedderBase:
         """Test default close implementation."""
         embedder = MockEmbedder()
         await embedder.close()  # Should not raise
-

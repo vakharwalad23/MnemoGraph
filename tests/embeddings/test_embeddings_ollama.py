@@ -1,6 +1,7 @@
 """
 Tests for Ollama embedder.
 """
+
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,11 +12,7 @@ from src.core.embeddings.ollama import OllamaEmbedder
 @pytest.fixture
 def ollama_embedder():
     """Create Ollama embedder for testing."""
-    return OllamaEmbedder(
-        host="http://localhost:11434",
-        model="nomic-embed-text",
-        timeout=120.0
-    )
+    return OllamaEmbedder(host="http://localhost:11434", model="nomic-embed-text", timeout=120.0)
 
 
 @pytest.mark.unit
@@ -33,27 +30,24 @@ class TestOllamaEmbedder:
 
     async def test_embed(self, ollama_embedder):
         """Test embedding generation."""
-        with patch.object(ollama_embedder.client, 'embeddings', new_callable=AsyncMock) as mock_embed:
-            mock_embed.return_value = {
-                "embedding": [0.1, 0.2, 0.3, 0.4, 0.5]
-            }
+        with patch.object(
+            ollama_embedder.client, "embeddings", new_callable=AsyncMock
+        ) as mock_embed:
+            mock_embed.return_value = {"embedding": [0.1, 0.2, 0.3, 0.4, 0.5]}
 
             result = await ollama_embedder.embed("test text")
 
             assert isinstance(result, list)
             assert len(result) == 5
             assert result == [0.1, 0.2, 0.3, 0.4, 0.5]
-            mock_embed.assert_called_once_with(
-                model="nomic-embed-text",
-                prompt="test text"
-            )
+            mock_embed.assert_called_once_with(model="nomic-embed-text", prompt="test text")
 
     async def test_embed_with_kwargs(self, ollama_embedder):
         """Test embedding with extra kwargs."""
-        with patch.object(ollama_embedder.client, 'embeddings', new_callable=AsyncMock) as mock_embed:
-            mock_embed.return_value = {
-                "embedding": [0.1, 0.2]
-            }
+        with patch.object(
+            ollama_embedder.client, "embeddings", new_callable=AsyncMock
+        ) as mock_embed:
+            mock_embed.return_value = {"embedding": [0.1, 0.2]}
 
             await ollama_embedder.embed("test", keep_alive="5m")
 
@@ -62,11 +56,13 @@ class TestOllamaEmbedder:
 
     async def test_batch_embed(self, ollama_embedder):
         """Test batch embedding."""
-        with patch.object(ollama_embedder.client, 'embeddings', new_callable=AsyncMock) as mock_embed:
+        with patch.object(
+            ollama_embedder.client, "embeddings", new_callable=AsyncMock
+        ) as mock_embed:
             mock_embed.side_effect = [
                 {"embedding": [0.1, 0.2]},
                 {"embedding": [0.3, 0.4]},
-                {"embedding": [0.5, 0.6]}
+                {"embedding": [0.5, 0.6]},
             ]
 
             texts = ["text1", "text2", "text3"]
@@ -85,7 +81,9 @@ class TestOllamaEmbedder:
 
     async def test_batch_embed_single_item(self, ollama_embedder):
         """Test batch embedding with single item."""
-        with patch.object(ollama_embedder.client, 'embeddings', new_callable=AsyncMock) as mock_embed:
+        with patch.object(
+            ollama_embedder.client, "embeddings", new_callable=AsyncMock
+        ) as mock_embed:
             mock_embed.return_value = {"embedding": [0.1, 0.2]}
 
             results = await ollama_embedder.batch_embed(["test"])
@@ -95,10 +93,10 @@ class TestOllamaEmbedder:
 
     async def test_get_dimension_caching(self, ollama_embedder):
         """Test dimension caching."""
-        with patch.object(ollama_embedder.client, 'embeddings', new_callable=AsyncMock) as mock_embed:
-            mock_embed.return_value = {
-                "embedding": [0.1, 0.2, 0.3]
-            }
+        with patch.object(
+            ollama_embedder.client, "embeddings", new_callable=AsyncMock
+        ) as mock_embed:
+            mock_embed.return_value = {"embedding": [0.1, 0.2, 0.3]}
 
             # First call should embed
             dim1 = await ollama_embedder.get_dimension()
@@ -167,4 +165,3 @@ class TestOllamaEmbedderIntegration:
             pytest.skip(f"Ollama not available: {e}")
         finally:
             await embedder.close()
-

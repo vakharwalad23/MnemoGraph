@@ -1,6 +1,7 @@
 """
 Tests for LLM base class.
 """
+
 import pytest
 from pydantic import BaseModel
 
@@ -23,6 +24,7 @@ class MockLLM(LLMProvider):
 
 class TestResponse(BaseModel):
     """Test response model."""
+
     answer: str
     confidence: float
 
@@ -47,10 +49,7 @@ class TestLLMProviderBase:
     async def test_complete_with_response_format(self):
         """Test complete with structured output."""
         provider = MockLLM()
-        result = await provider.complete(
-            "test prompt",
-            response_format=TestResponse
-        )
+        result = await provider.complete("test prompt", response_format=TestResponse)
         assert isinstance(result, TestResponse)
         assert result.answer == "test"
         assert result.confidence == 0.9
@@ -58,15 +57,10 @@ class TestLLMProviderBase:
     async def test_complete_with_parameters(self):
         """Test complete with custom parameters."""
         provider = MockLLM()
-        result = await provider.complete(
-            "test",
-            max_tokens=100,
-            temperature=0.7
-        )
+        result = await provider.complete("test", max_tokens=100, temperature=0.7)
         assert result == "test response"
 
     async def test_close_default(self):
         """Test default close implementation."""
         provider = MockLLM()
         await provider.close()  # Should not raise
-
