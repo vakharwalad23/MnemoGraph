@@ -368,7 +368,7 @@ class SQLiteGraphStore(GraphStore):
         direction: str = "outgoing",
         depth: int = 1,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> list[tuple[Memory, Edge]]:
         """Get neighboring nodes."""
         await self.connect()
 
@@ -381,21 +381,24 @@ class SQLiteGraphStore(GraphStore):
         # Single depth
         if direction == "outgoing":
             query = """
-                SELECT n.*, e.id as edge_id, e.type as edge_type, e.metadata as edge_metadata
+                SELECT n.*, e.id as edge_id, e.type as edge_type, e.metadata as edge_metadata,
+                       e.source_id, e.confidence, e.created_at as edge_created
                 FROM edges e
                 JOIN nodes n ON e.target_id = n.id
                 WHERE e.source_id = ?
             """
         elif direction == "incoming":
             query = """
-                SELECT n.*, e.id as edge_id, e.type as edge_type, e.metadata as edge_metadata
+                SELECT n.*, e.id as edge_id, e.type as edge_type, e.metadata as edge_metadata,
+                       e.target_id, e.confidence, e.created_at as edge_created
                 FROM edges e
                 JOIN nodes n ON e.source_id = n.id
                 WHERE e.target_id = ?
             """
         else:  # both
             query = """
-                SELECT n.*, e.id as edge_id, e.type as edge_type, e.metadata as edge_metadata
+                SELECT n.*, e.id as edge_id, e.type as edge_type, e.metadata as edge_metadata,
+                       e.source_id, e.confidence, e.created_at as edge_created
                 FROM edges e
                 JOIN nodes n ON (e.target_id = n.id OR e.source_id = n.id)
                 WHERE (e.source_id = ? OR e.target_id = ?) AND n.id != ?
@@ -420,14 +423,19 @@ class SQLiteGraphStore(GraphStore):
             # Extract node columns
             node = self._row_to_memory(row[:17])  # First 17 columns are node data
 
-            # Extract edge info
-            edge_info = {
-                "id": row[17],  # edge_id
-                "type": row[18],  # edge_type
-                "metadata": json.loads(row[19]) if row[19] else {},  # edge_metadata
-            }
+            # Create proper Edge object
+            edge = Edge(
+                source=row[20] if direction == "outgoing" else node.id,  # source_id
+                target=node.id if direction == "outgoing" else row[20],  # target_id
+                type=RelationshipType(row[18]),  # edge_type
+                confidence=row[21] if len(row) > 21 else 1.0,  # confidence
+                created_at=(
+                    datetime.fromisoformat(row[22]) if len(row) > 22 and row[22] else datetime.now()
+                ),
+                metadata=json.loads(row[19]) if row[19] else {},  # edge_metadata
+            )
 
-            results.append({"node": node, "edge": edge_info})
+            results.append((node, edge))
 
         return results
 
@@ -438,7 +446,7 @@ class SQLiteGraphStore(GraphStore):
         direction: str,
         depth: int,
         limit: int,
-    ) -> list[dict[str, Any]]:
+    ) -> list[tuple[Memory, Edge]]:
         """Recursive neighbor traversal (simplified BFS)."""
         visited = set()
         results = []
