@@ -3,12 +3,13 @@ Neo4j graph store implementation - redesigned for Phase 2 & 3.
 
 Production-grade graph database for complex relationship queries and graph analytics.
 """
+
 import json
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from neo4j import AsyncGraphDatabase, AsyncDriver
+from neo4j import AsyncDriver, AsyncGraphDatabase
 
 from src.core.graph_store.base import GraphStore
 from src.models.memory import Memory, MemoryStatus, NodeType
@@ -65,29 +66,24 @@ class Neo4jGraphStore(GraphStore):
         async with self.driver.session(database=self.database) as session:
             # Create constraint on Memory ID (unique)
             await session.run(
-                "CREATE CONSTRAINT memory_id IF NOT EXISTS "
-                "FOR (m:Memory) REQUIRE m.id IS UNIQUE"
+                "CREATE CONSTRAINT memory_id IF NOT EXISTS " "FOR (m:Memory) REQUIRE m.id IS UNIQUE"
             )
 
             # Create indices for fast lookups
             await session.run(
-                "CREATE INDEX memory_status IF NOT EXISTS "
-                "FOR (m:Memory) ON (m.status)"
+                "CREATE INDEX memory_status IF NOT EXISTS " "FOR (m:Memory) ON (m.status)"
             )
 
             await session.run(
-                "CREATE INDEX memory_type IF NOT EXISTS "
-                "FOR (m:Memory) ON (m.type)"
+                "CREATE INDEX memory_type IF NOT EXISTS " "FOR (m:Memory) ON (m.type)"
             )
 
             await session.run(
-                "CREATE INDEX memory_created IF NOT EXISTS "
-                "FOR (m:Memory) ON (m.created_at)"
+                "CREATE INDEX memory_created IF NOT EXISTS " "FOR (m:Memory) ON (m.created_at)"
             )
 
             await session.run(
-                "CREATE INDEX memory_version IF NOT EXISTS "
-                "FOR (m:Memory) ON (m.version)"
+                "CREATE INDEX memory_version IF NOT EXISTS " "FOR (m:Memory) ON (m.version)"
             )
 
     # ═══════════════════════════════════════════════════════════
@@ -131,7 +127,9 @@ class Neo4jGraphStore(GraphStore):
                     "invalidation_reason": memory.invalidation_reason,
                     "confidence": memory.confidence,
                     "access_count": memory.access_count,
-                    "last_accessed": memory.last_accessed.isoformat() if memory.last_accessed else None,
+                    "last_accessed": (
+                        memory.last_accessed.isoformat() if memory.last_accessed else None
+                    ),
                     "created_at": memory.created_at.isoformat(),
                     "updated_at": memory.updated_at.isoformat(),
                     "metadata": json.dumps(memory.metadata),
@@ -143,10 +141,7 @@ class Neo4jGraphStore(GraphStore):
         await self.connect()
 
         async with self.driver.session(database=self.database) as session:
-            result = await session.run(
-                "MATCH (m:Memory {id: $id}) RETURN m",
-                {"id": node_id}
-            )
+            result = await session.run("MATCH (m:Memory {id: $id}) RETURN m", {"id": node_id})
 
             record = await result.single()
             if not record:
@@ -164,10 +159,7 @@ class Neo4jGraphStore(GraphStore):
         await self.connect()
 
         async with self.driver.session(database=self.database) as session:
-            await session.run(
-                "MATCH (m:Memory {id: $id}) DETACH DELETE m",
-                {"id": node_id}
-            )
+            await session.run("MATCH (m:Memory {id: $id}) DETACH DELETE m", {"id": node_id})
 
     async def query_memories(
         self,
@@ -305,7 +297,7 @@ class Neo4jGraphStore(GraphStore):
                 MATCH (a)-[r {id: $edge_id}]->(b)
                 RETURN r, type(r) as edge_type, a.id as source, b.id as target
                 """,
-                {"edge_id": edge_id}
+                {"edge_id": edge_id},
             )
 
             record = await result.single()
@@ -354,7 +346,7 @@ class Neo4jGraphStore(GraphStore):
                         MATCH (a:Memory {id: $target_id})-[r]->(b:Memory {id: $source_id})
                         RETURN r, type(r) as edge_type LIMIT 1
                         """,
-                        params
+                        params,
                     )
                     record = await result.single()
 
@@ -395,10 +387,7 @@ class Neo4jGraphStore(GraphStore):
         await self.connect()
 
         async with self.driver.session(database=self.database) as session:
-            await session.run(
-                "MATCH ()-[r {id: $edge_id}]->() DELETE r",
-                {"edge_id": edge_id}
-            )
+            await session.run("MATCH ()-[r {id: $edge_id}]->() DELETE r", {"edge_id": edge_id})
 
     # ═══════════════════════════════════════════════════════════
     # GRAPH TRAVERSAL
@@ -411,7 +400,7 @@ class Neo4jGraphStore(GraphStore):
         direction: str = "outgoing",
         depth: int = 1,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> list[tuple[Memory, Edge]]:
         """Get neighboring nodes."""
         await self.connect()
 
@@ -445,29 +434,34 @@ class Neo4jGraphStore(GraphStore):
                 # Handle both single relationship and path
                 if isinstance(rel, list):
                     # Path with multiple relationships
-                    edge_info = {
-                        "id": rel[0].get("id", "path"),
-                        "type": "PATH",
-                        "metadata": {},
-                    }
+                    edge_info = Edge(
+                        source=node_id,
+                        target=node["id"],
+                        type=RelationshipType(record["r"]["type"]),
+                        confidence=record["r"].get("confidence", 1.0),
+                        created_at=datetime.fromisoformat(
+                            record["r"].get("created_at", datetime.now().isoformat())
+                        ),
+                        metadata={},
+                    )
                 else:
                     # Single relationship
-                    edge_info = {
-                        "id": rel.get("id", ""),
-                        "type": rel.type if hasattr(rel, 'type') else "",
-                        "metadata": json.loads(rel.get("metadata", "{}")),
-                    }
+                    edge_info = Edge(
+                        source=node_id,
+                        target=node["id"],
+                        type=RelationshipType(record["r"]["type"]),
+                        confidence=record["r"].get("confidence", 1.0),
+                        created_at=datetime.fromisoformat(
+                            record["r"].get("created_at", datetime.now().isoformat())
+                        ),
+                        metadata=json.loads(record["r"].get("metadata", "{}")),
+                    )
 
-                neighbors.append({
-                    "node": self._node_to_memory(node),
-                    "edge": edge_info,
-                })
+                neighbors.append((self._node_to_memory(node), edge_info))
 
             return neighbors
 
-    async def find_path(
-        self, start_id: str, end_id: str, max_depth: int = 5
-    ) -> list[str] | None:
+    async def find_path(self, start_id: str, end_id: str, max_depth: int = 5) -> list[str] | None:
         """Find shortest path between two nodes."""
         await self.connect()
 
@@ -479,7 +473,7 @@ class Neo4jGraphStore(GraphStore):
                 )
                 RETURN [node in nodes(path) | node.id] as node_ids
                 """,
-                {"start_id": start_id, "end_id": end_id}
+                {"start_id": start_id, "end_id": end_id},
             )
 
             record = await result.single()
@@ -545,13 +539,17 @@ class Neo4jGraphStore(GraphStore):
             version=node.get("version", 1),
             parent_version=node.get("parent_version"),
             valid_from=datetime.fromisoformat(node["valid_from"]),
-            valid_until=datetime.fromisoformat(node["valid_until"]) if node.get("valid_until") else None,
+            valid_until=(
+                datetime.fromisoformat(node["valid_until"]) if node.get("valid_until") else None
+            ),
             status=MemoryStatus(node["status"]),
             superseded_by=node.get("superseded_by"),
             invalidation_reason=node.get("invalidation_reason"),
             confidence=node.get("confidence", 1.0),
             access_count=node.get("access_count", 0),
-            last_accessed=datetime.fromisoformat(node["last_accessed"]) if node.get("last_accessed") else None,
+            last_accessed=(
+                datetime.fromisoformat(node["last_accessed"]) if node.get("last_accessed") else None
+            ),
             created_at=datetime.fromisoformat(node["created_at"]),
             updated_at=datetime.fromisoformat(node["updated_at"]),
             metadata=json.loads(node.get("metadata", "{}")),

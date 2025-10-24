@@ -3,8 +3,8 @@ SQLite graph store implementation - redesigned for Phase 2 & 3.
 
 Clean, efficient implementation using aiosqlite.
 """
+
 import json
-import random
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -55,7 +55,8 @@ class SQLiteGraphStore(GraphStore):
         await self.connect()
 
         # Create nodes table
-        await self.connection.execute("""
+        await self.connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS nodes (
                 id TEXT PRIMARY KEY,
                 content TEXT NOT NULL,
@@ -75,10 +76,12 @@ class SQLiteGraphStore(GraphStore):
                 updated_at TEXT NOT NULL,
                 metadata TEXT DEFAULT '{}'
             )
-        """)
+        """
+        )
 
         # Create edges table
-        await self.connection.execute("""
+        await self.connection.execute(
+            """
             CREATE TABLE IF NOT EXISTS edges (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_id TEXT NOT NULL,
@@ -90,15 +93,14 @@ class SQLiteGraphStore(GraphStore):
                 FOREIGN KEY (source_id) REFERENCES nodes(id) ON DELETE CASCADE,
                 FOREIGN KEY (target_id) REFERENCES nodes(id) ON DELETE CASCADE
             )
-        """)
+        """
+        )
 
         # Create indices
         await self.connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes(status)"
         )
-        await self.connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type)"
-        )
+        await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type)")
         await self.connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_nodes_created ON nodes(created_at)"
         )
@@ -108,9 +110,7 @@ class SQLiteGraphStore(GraphStore):
         await self.connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id)"
         )
-        await self.connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(type)"
-        )
+        await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(type)")
 
         await self.connection.commit()
 
@@ -160,9 +160,7 @@ class SQLiteGraphStore(GraphStore):
         """Retrieve a memory node by ID."""
         await self.connect()
 
-        cursor = await self.connection.execute(
-            "SELECT * FROM nodes WHERE id = ?", (node_id,)
-        )
+        cursor = await self.connection.execute("SELECT * FROM nodes WHERE id = ?", (node_id,))
         row = await cursor.fetchone()
 
         if not row:
@@ -293,9 +291,7 @@ class SQLiteGraphStore(GraphStore):
         """Get edge by ID."""
         await self.connect()
 
-        cursor = await self.connection.execute(
-            "SELECT * FROM edges WHERE id = ?", (edge_id,)
-        )
+        cursor = await self.connection.execute("SELECT * FROM edges WHERE id = ?", (edge_id,))
         row = await cursor.fetchone()
 
         if not row:
@@ -423,7 +419,7 @@ class SQLiteGraphStore(GraphStore):
         for row in rows:
             # Extract node columns
             node = self._row_to_memory(row[:17])  # First 17 columns are node data
-            
+
             # Extract edge info
             edge_info = {
                 "id": row[17],  # edge_id
@@ -472,9 +468,7 @@ class SQLiteGraphStore(GraphStore):
 
         return results
 
-    async def find_path(
-        self, start_id: str, end_id: str, max_depth: int = 5
-    ) -> list[str] | None:
+    async def find_path(self, start_id: str, end_id: str, max_depth: int = 5) -> list[str] | None:
         """Find shortest path between two nodes (BFS)."""
         await self.connect()
 

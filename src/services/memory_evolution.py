@@ -7,14 +7,16 @@ Handles:
 - Version history queries
 - Time-travel queries (point-in-time snapshots)
 """
+
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel
 
+from src.core.embeddings.base import Embedder
+from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
 from src.models.memory import Memory, MemoryStatus
-from src.models.version import MemoryEvolution, VersionChange, VersionChain
+from src.models.version import MemoryEvolution, VersionChain, VersionChange
 
 
 class EvolutionAnalysis(BaseModel):
@@ -40,8 +42,8 @@ class MemoryEvolutionService:
     def __init__(
         self,
         llm: LLMProvider,
-        graph_store: Any,  # Will be properly typed in integration
-        embedder: Any,  # Will be properly typed in integration
+        graph_store: GraphStore,  # Will be properly typed in integration
+        embedder: Embedder,  # Will be properly typed in integration
     ):
         """
         Initialize memory evolution service.
@@ -55,9 +57,7 @@ class MemoryEvolutionService:
         self.graph_store = graph_store
         self.embedder = embedder
 
-    async def evolve_memory(
-        self, current: Memory, new_info: str
-    ) -> MemoryEvolution:
+    async def evolve_memory(self, current: Memory, new_info: str) -> MemoryEvolution:
         """
         Evolve a memory with new information.
 
@@ -79,17 +79,13 @@ class MemoryEvolutionService:
 
         if analysis.action in ["update", "replace"]:
             # Create new version
-            new_version = await self._create_new_version(
-                current, new_info, analysis
-            )
+            new_version = await self._create_new_version(current, new_info, analysis)
 
             # Mark current as superseded
             current.status = MemoryStatus.SUPERSEDED
             current.valid_until = datetime.now()
             current.superseded_by = new_version.id
-            current.invalidation_reason = (
-                f"Superseded: {analysis.change_description}"
-            )
+            current.invalidation_reason = f"Superseded: {analysis.change_description}"
             current.updated_at = datetime.now()
 
             # Save both versions
@@ -143,9 +139,7 @@ class MemoryEvolutionService:
                 ),
             )
 
-    async def _analyze_evolution(
-        self, current: Memory, new_info: str
-    ) -> EvolutionAnalysis:
+    async def _analyze_evolution(self, current: Memory, new_info: str) -> EvolutionAnalysis:
         """
         Use LLM to analyze how to evolve the memory.
 
@@ -180,9 +174,7 @@ Respond with JSON:
 - confidence: 0.0-1.0 confidence in this decision
 """
 
-        result = await self.llm.complete(
-            prompt, response_format=EvolutionAnalysis, temperature=0.0
-        )
+        result = await self.llm.complete(prompt, response_format=EvolutionAnalysis, temperature=0.0)
 
         return result
 
@@ -253,11 +245,7 @@ Respond with JSON:
                     "version": memory.version,
                     "status": memory.status.value,
                     "valid_from": memory.valid_from.isoformat(),
-                    "valid_until": (
-                        memory.valid_until.isoformat()
-                        if memory.valid_until
-                        else None
-                    ),
+                    "valid_until": (memory.valid_until.isoformat() if memory.valid_until else None),
                     "created_at": memory.created_at.isoformat(),
                 }
             )
@@ -385,4 +373,3 @@ Respond with JSON:
         await self.graph_store.add_node(new_version)
 
         return new_version
-

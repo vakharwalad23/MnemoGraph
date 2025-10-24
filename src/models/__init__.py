@@ -9,6 +9,7 @@ Core models:
 - RelationshipType, Edge: Relationship models
 - RelationshipBundle, ContextBundle: Extraction results
 """
+
 from src.models.memory import Memory, MemoryStatus, NodeType
 from src.models.relationships import (
     ContextBundle,
@@ -20,8 +21,8 @@ from src.models.relationships import (
 from src.models.version import (
     InvalidationResult,
     MemoryEvolution,
-    VersionChange,
     VersionChain,
+    VersionChange,
 )
 
 __all__ = [

@@ -3,7 +3,8 @@ Qdrant vector store implementation - redesigned for Phase 1-3.
 
 Clean implementation that works with new Memory model and optimized for performance.
 """
-from datetime import UTC, datetime
+
+from datetime import datetime
 from typing import Any
 from uuid import NAMESPACE_DNS, UUID, uuid5
 
@@ -200,14 +201,22 @@ class QdrantStore(VectorStore):
             version=payload.get("version", 1),
             parent_version=payload.get("parent_version"),
             valid_from=datetime.fromisoformat(payload["valid_from"]),
-            valid_until=datetime.fromisoformat(payload["valid_until"]) if payload.get("valid_until") else None,
+            valid_until=(
+                datetime.fromisoformat(payload["valid_until"])
+                if payload.get("valid_until")
+                else None
+            ),
             status=MemoryStatus(payload["status"]),
             superseded_by=payload.get("superseded_by"),
             invalidation_reason=payload.get("invalidation_reason"),
             metadata=payload.get("metadata", {}),
             confidence=payload.get("confidence", 1.0),
             access_count=payload.get("access_count", 0),
-            last_accessed=datetime.fromisoformat(payload["last_accessed"]) if payload.get("last_accessed") else None,
+            last_accessed=(
+                datetime.fromisoformat(payload["last_accessed"])
+                if payload.get("last_accessed")
+                else None
+            ),
             created_at=datetime.fromisoformat(payload["created_at"]),
             updated_at=datetime.fromisoformat(payload["updated_at"]),
         )
@@ -292,7 +301,11 @@ class QdrantStore(VectorStore):
 
             # Status filter
             if "status" in filters:
-                status_values = filters["status"] if isinstance(filters["status"], list) else [filters["status"]]
+                status_values = (
+                    filters["status"]
+                    if isinstance(filters["status"], list)
+                    else [filters["status"]]
+                )
                 conditions.append(
                     FieldCondition(
                         key="status",
@@ -302,7 +315,9 @@ class QdrantStore(VectorStore):
 
             # Type filter
             if "type" in filters:
-                type_values = filters["type"] if isinstance(filters["type"], list) else [filters["type"]]
+                type_values = (
+                    filters["type"] if isinstance(filters["type"], list) else [filters["type"]]
+                )
                 conditions.append(
                     FieldCondition(
                         key="type",

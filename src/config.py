@@ -1,6 +1,7 @@
 """
 Configuration for MnemoGraph V2.
 """
+
 from pydantic import BaseModel
 
 

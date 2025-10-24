@@ -2,14 +2,23 @@
 LLM-native relationship extraction engine.
 Uses multi-stage filtering + single LLM call for all relationship types.
 """
+
 import asyncio
 import time
-from typing import Any
 
+from src.config import Config
 from src.core.embeddings.base import Embedder
+from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
+from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, NodeType
-from src.models.relationships import ContextBundle, RelationshipBundle
+from src.models.relationships import (
+    ContextBundle,
+    DerivedInsight,
+    Edge,
+    RelationshipBundle,
+    RelationshipType,
+)
 from src.services.context_filter import MultiStageFilter
 from src.services.invalidation_manager import InvalidationManager
 
@@ -29,9 +38,9 @@ class LLMRelationshipEngine:
         self,
         llm_provider: LLMProvider,
         embedder: Embedder,
-        vector_store: Any,
-        graph_store: Any,
-        config: Any,
+        vector_store: VectorStore,
+        graph_store: GraphStore,
+        config: Config,
     ):
         """
         Initialize LLM relationship engine.
@@ -50,9 +59,7 @@ class LLMRelationshipEngine:
         self.config = config
 
         # Initialize sub-systems
-        self.filter = MultiStageFilter(
-            vector_store, graph_store, llm_provider, config
-        )
+        self.filter = MultiStageFilter(vector_store, graph_store, llm_provider, config)
 
         self.invalidation = InvalidationManager(llm_provider, graph_store, vector_store)
 
@@ -85,7 +92,7 @@ class LLMRelationshipEngine:
         # - LLM extraction
         # - Vector store upsert
         # - Graph node creation
-        print(f"🤖 Extracting relationships with LLM...")
+        print("🤖 Extracting relationships with LLM...")
 
         extraction_task = self.llm.complete(
             prompt, response_format=RelationshipBundle, max_tokens=2000, temperature=0.0
@@ -102,7 +109,7 @@ class LLMRelationshipEngine:
         extraction = results[0] if not isinstance(results[0], Exception) else None
 
         if not extraction:
-            print(f"❌ LLM extraction failed")
+            print("❌ LLM extraction failed")
             return RelationshipBundle(
                 memory_id=memory.id,
                 relationships=[],
@@ -130,15 +137,13 @@ class LLMRelationshipEngine:
 
         # Step 5: Handle derived memories
         if extraction.derived_insights:
-            print(
-                f"💡 Creating {len(extraction.derived_insights)} derived memories..."
-            )
+            print(f"💡 Creating {len(extraction.derived_insights)} derived memories...")
             await self._create_derived_memories(extraction.derived_insights, memory)
 
         # Step 6: Event-driven invalidation check
         # Check if this new memory supersedes any existing ones
         if context.vector_candidates:
-            print(f"🔄 Checking for supersession...")
+            print("🔄 Checking for supersession...")
             superseded = await self.invalidation.check_supersession(
                 memory, context.vector_candidates[:10]
             )
@@ -152,9 +157,7 @@ class LLMRelationshipEngine:
 
         return extraction
 
-    def _build_extraction_prompt(
-        self, memory: Memory, context: ContextBundle
-    ) -> str:
+    def _build_extraction_prompt(self, memory: Memory, context: ContextBundle) -> str:
         """
         Build comprehensive relationship extraction prompt.
 
@@ -313,9 +316,7 @@ Begin extraction:
             lines.append(f"- [{mem.id}] {preview}")
         return "\n".join(lines)
 
-    def _create_edge_from_relationship(
-        self, source_id: str, rel: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _create_edge_from_relationship(self, source_id: str, rel: RelationshipType) -> Edge:
         """
         Create edge dict from relationship.
 
@@ -337,9 +338,7 @@ Begin extraction:
             },
         }
 
-    async def _create_derived_memories(
-        self, insights: list[dict[str, Any]], source_memory: Memory
-    ):
+    async def _create_derived_memories(self, insights: list[DerivedInsight], source_memory: Memory):
         """
         Create derived memory nodes from LLM insights.
 
@@ -354,30 +353,30 @@ Begin extraction:
         )
 
         for insight in insights:
-            if insight.get("confidence", 0) < min_derived_confidence:
+            if insight.confidence < min_derived_confidence:
                 continue
 
             try:
                 # Generate unique ID
-                derived_id = f"derived_{source_memory.id}_{hash(insight['content']) % 10000}"
+                derived_id = f"derived_{source_memory.id}_{hash(insight.content) % 10000}"
 
                 # Generate embedding
-                embedding = await self.embedder.embed(insight["content"])
+                embedding = await self.embedder.embed(insight.content)
 
                 # Create derived memory
                 derived = Memory(
                     id=derived_id,
-                    content=insight["content"],
+                    content=insight.content,
                     type=NodeType.DERIVED,
                     embedding=embedding,
                     metadata={
-                        "confidence": insight["confidence"],
-                        "reasoning": insight["reasoning"],
-                        "synthesis_type": insight["type"],
-                        "derived_from": insight["source_ids"],
+                        "confidence": insight.confidence,
+                        "reasoning": insight.reasoning,
+                        "synthesis_type": insight.type,
+                        "derived_from": insight.source_ids,
                         "triggered_by": source_memory.id,
                     },
-                    confidence=insight["confidence"],
+                    confidence=insight.confidence,
                 )
 
                 # Add to stores
@@ -404,4 +403,3 @@ Begin extraction:
         """Close resources."""
         await self.llm.close()
         await self.embedder.close()
-

@@ -1,6 +1,7 @@
 """
 Relationship models and types for memory graph.
 """
+
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -108,4 +109,3 @@ class FilterStageResult(BaseModel):
     candidates_out: int
     time_ms: float
     method: str
-

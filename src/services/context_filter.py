@@ -4,6 +4,7 @@ Multi-stage filtering pipeline to narrow millions of memories to relevant contex
 Pipeline:
 1M memories → 100 (vector) → 50 (hybrid) → 20 (LLM filter) → extraction
 """
+
 import asyncio
 import time
 from datetime import datetime, timedelta
@@ -11,7 +12,11 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from src.config import Config
+from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
+from src.core.vector_store.base import VectorStore
+from src.models.memory import Memory
 from src.models.relationships import ContextBundle
 
 
@@ -33,10 +38,10 @@ class MultiStageFilter:
 
     def __init__(
         self,
-        vector_store: Any,
-        graph_store: Any,
+        vector_store: VectorStore,
+        graph_store: GraphStore,
         llm_provider: LLMProvider,
-        config: Any,
+        config: Config,
     ):
         """
         Initialize multi-stage filter.
@@ -52,7 +57,7 @@ class MultiStageFilter:
         self.llm = llm_provider
         self.config = config
 
-    async def gather_context(self, new_memory: Any) -> ContextBundle:
+    async def gather_context(self, new_memory: Memory) -> ContextBundle:
         """
         Main entry point: Gather all relevant context for a new memory.
 
@@ -86,9 +91,7 @@ class MultiStageFilter:
         # Goal: 50 candidates → 15-20 highly relevant
 
         start = time.time()
-        combined_candidates = self._combine_and_deduplicate(
-            vector_candidates, context_results
-        )
+        combined_candidates = self._combine_and_deduplicate(vector_candidates, context_results)
 
         # Get context window from config (default 50)
         context_window = getattr(
@@ -105,13 +108,15 @@ class MultiStageFilter:
         stage3_time = (time.time() - start) * 1000
 
         # Log performance
-        print(f"""
+        print(
+            f"""
 Context Gathering Performance:
   Stage 1 (Vector):  {stage1_time:.1f}ms → {len(vector_candidates)} candidates
   Stage 2 (Hybrid):  {stage2_time:.1f}ms → {len(combined_candidates)} total
   Stage 3 (LLM Pre): {stage3_time:.1f}ms → {len(filtered)} final
   Total: {stage1_time + stage2_time + stage3_time:.1f}ms
-""")
+"""
+        )
 
         return ContextBundle(
             vector_candidates=vector_candidates[:10],  # Top 10 for context
@@ -122,7 +127,7 @@ Context Gathering Performance:
             filtered_candidates=filtered,
         )
 
-    async def _stage1_vector_search(self, memory: Any) -> list[Any]:
+    async def _stage1_vector_search(self, memory: Memory) -> list[Memory]:
         """
         Stage 1: Vector similarity search.
         Uses Qdrant HNSW index for fast approximate search.
@@ -141,9 +146,7 @@ Context Gathering Performance:
                     # Only search active/historical memories
                     "status": ["active", "historical"],
                     # Optional: Time window for temporal relevance
-                    "created_after": (
-                        datetime.now() - timedelta(days=90)
-                    ).isoformat(),
+                    "created_after": (datetime.now() - timedelta(days=90)).isoformat(),
                 },
                 score_threshold=0.3,  # Cosine similarity > 0.3
             )
@@ -154,7 +157,7 @@ Context Gathering Performance:
             print(f"Vector search failed: {e}")
             return []
 
-    async def _stage2_hybrid_filtering(self, memory: Any) -> dict[str, list[Any]]:
+    async def _stage2_hybrid_filtering(self, memory: Memory) -> dict[str, list[Memory]]:
         """
         Stage 2: Gather context from multiple dimensions in parallel.
 
@@ -177,14 +180,10 @@ Context Gathering Performance:
             "temporal": results[0] if not isinstance(results[0], Exception) else [],
             "graph": results[1] if not isinstance(results[1], Exception) else [],
             "entity": results[2] if not isinstance(results[2], Exception) else [],
-            "conversation": results[3]
-            if not isinstance(results[3], Exception)
-            else [],
+            "conversation": results[3] if not isinstance(results[3], Exception) else [],
         }
 
-    async def _temporal_filter(
-        self, memory: Any, window_days: int = 30
-    ) -> list[Any]:
+    async def _temporal_filter(self, memory: Any, window_days: int = 30) -> list[Memory]:
         """
         Get recent memories for temporal context.
 
@@ -209,7 +208,7 @@ Context Gathering Performance:
         except Exception:
             return []
 
-    async def _graph_filter(self, memory: Any, depth: int = 2) -> list[Any]:
+    async def _graph_filter(self, memory: Memory, depth: int = 2) -> list[Memory]:
         """
         Get graph neighbors for structural context.
 
@@ -240,7 +239,7 @@ Context Gathering Performance:
             # Node might not exist yet (being created)
             return []
 
-    async def _entity_filter(self, memory: Any) -> list[Any]:
+    async def _entity_filter(self, memory: Memory) -> list[Memory]:
         """
         Find memories with shared entities.
         Uses LLM or lightweight model for entity extraction.
@@ -284,7 +283,7 @@ Return format: ["entity1", "entity2", "entity3"]
         except Exception:
             return []
 
-    async def _conversation_filter(self, memory: Any) -> list[Any]:
+    async def _conversation_filter(self, memory: Memory) -> list[Memory]:
         """
         Get conversation thread context if applicable.
 
@@ -312,8 +311,8 @@ Return format: ["entity1", "entity2", "entity3"]
             return []
 
     async def _stage3_llm_prefilter(
-        self, new_memory: Any, candidates: list[Any], target_count: int
-    ) -> list[Any]:
+        self, new_memory: Memory, candidates: list[Memory], target_count: int
+    ) -> list[Memory]:
         """
         Stage 3: Use fast/cheap LLM to rank candidates by relevance.
 
@@ -375,8 +374,8 @@ Return JSON array of top {target} most relevant:
             return candidates[:target]
 
     def _combine_and_deduplicate(
-        self, vector_candidates: list[Any], context_results: dict[str, list[Any]]
-    ) -> list[Any]:
+        self, vector_candidates: list[Memory], context_results: dict[str, list[Memory]]
+    ) -> list[Memory]:
         """
         Combine results from all stages and remove duplicates.
 
@@ -393,7 +392,7 @@ Return JSON array of top {target} most relevant:
         all_candidates.extend(vector_candidates[:50])
 
         # Add context candidates
-        for context_type, memories in context_results.items():
+        for _context_type, memories in context_results.items():
             all_candidates.extend(memories)
 
         # Deduplicate by ID
@@ -407,7 +406,7 @@ Return JSON array of top {target} most relevant:
 
         return unique_candidates
 
-    def _deduplicate(self, memories: list[Any]) -> list[Any]:
+    def _deduplicate(self, memories: list[Memory]) -> list[Memory]:
         """
         Remove duplicate memories by ID.
 
@@ -427,7 +426,7 @@ Return JSON array of top {target} most relevant:
 
         return unique
 
-    def _format_candidates_compact(self, candidates: list[Any]) -> str:
+    def _format_candidates_compact(self, candidates: list[Memory]) -> str:
         """
         Format candidates compactly for LLM prompt.
 
@@ -439,10 +438,7 @@ Return JSON array of top {target} most relevant:
         """
         lines = []
         for i, mem in enumerate(candidates, 1):
-            content_preview = (
-                mem.content[:100] + "..." if len(mem.content) > 100 else mem.content
-            )
+            content_preview = mem.content[:100] + "..." if len(mem.content) > 100 else mem.content
             lines.append(f"{i}. [{mem.id}] {content_preview}")
 
         return "\n".join(lines)
-

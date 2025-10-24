@@ -3,6 +3,7 @@ Base interface for vector storage - redesigned for Phase 1-3.
 
 Clean interface that works with new Memory model and embedding system.
 """
+
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -127,4 +128,3 @@ class VectorStore(ABC):
     async def close(self) -> None:
         """Close the connection to the vector store."""
         pass
-

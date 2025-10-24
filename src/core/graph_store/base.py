@@ -3,6 +3,7 @@ Base interface for graph storage - redesigned for Phase 2 & 3.
 
 Clean interface that works with new Memory model and relationship system.
 """
+
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -180,7 +181,7 @@ class GraphStore(ABC):
         direction: str = "outgoing",
         depth: int = 1,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+    ) -> list[tuple[Memory, Edge]]:
         """
         Get neighboring nodes.
 
@@ -192,14 +193,12 @@ class GraphStore(ABC):
             limit: Maximum results
 
         Returns:
-            List of neighbor dicts with 'node' and 'edge' keys
+            List of tuples with (Memory, Edge)
         """
         pass
 
     @abstractmethod
-    async def find_path(
-        self, start_id: str, end_id: str, max_depth: int = 5
-    ) -> list[str] | None:
+    async def find_path(self, start_id: str, end_id: str, max_depth: int = 5) -> list[str] | None:
         """
         Find shortest path between two nodes.
 
@@ -231,9 +230,7 @@ class GraphStore(ABC):
         pass
 
     @abstractmethod
-    async def count_edges(
-        self, relationship_type: str | None = None
-    ) -> int:
+    async def count_edges(self, relationship_type: str | None = None) -> int:
         """
         Count edges.
 

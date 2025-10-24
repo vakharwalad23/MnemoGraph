@@ -8,13 +8,15 @@ Three strategies:
 2. Proactive (background): Periodic validation worker
 3. Event-driven: Validate when related memories change
 """
+
 import asyncio
 from datetime import datetime, timedelta
-from typing import Any
 
 from pydantic import BaseModel
 
+from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
+from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, MemoryStatus
 from src.models.version import InvalidationResult
 
@@ -48,8 +50,8 @@ class InvalidationManager:
     def __init__(
         self,
         llm: LLMProvider,
-        graph_store: Any,
-        vector_store: Any,
+        graph_store: GraphStore,
+        vector_store: VectorStore,
     ):
         """
         Initialize invalidation manager.
@@ -70,9 +72,7 @@ class InvalidationManager:
     # 1. ON-DEMAND INVALIDATION (Lazy Evaluation)
     # ═══════════════════════════════════════════════════════════
 
-    async def validate_on_access(
-        self, memory: Memory, current_context: str = ""
-    ) -> Memory:
+    async def validate_on_access(self, memory: Memory, current_context: str = "") -> Memory:
         """
         Check memory validity when it's accessed.
 
@@ -158,9 +158,7 @@ class InvalidationManager:
             interval_hours: Hours between validation runs
         """
         if self._worker_task is None or self._worker_task.done():
-            self._worker_task = asyncio.create_task(
-                self._invalidation_worker(interval_hours)
-            )
+            self._worker_task = asyncio.create_task(self._invalidation_worker(interval_hours))
 
     def stop_background_worker(self):
         """Stop background invalidation worker."""
@@ -176,7 +174,7 @@ class InvalidationManager:
         """
         while True:
             try:
-                print(f"🔄 Starting periodic memory validation...")
+                print("🔄 Starting periodic memory validation...")
 
                 # Find memories that need validation
                 candidates = await self._find_validation_candidates()
@@ -226,9 +224,7 @@ class InvalidationManager:
             old_inactive = await self.graph_store.query_memories(
                 filters={
                     "status": MemoryStatus.ACTIVE.value,
-                    "created_before": (
-                        datetime.now() - timedelta(days=180)
-                    ).isoformat(),
+                    "created_before": (datetime.now() - timedelta(days=180)).isoformat(),
                     "access_count_lt": 5,
                 },
                 limit=50,
@@ -301,9 +297,7 @@ class InvalidationManager:
 
         for candidate in similar_memories:
             # Only check highly similar memories
-            similarity = self._calculate_similarity(
-                new_memory.embedding, candidate.embedding
-            )
+            similarity = self._calculate_similarity(new_memory.embedding, candidate.embedding)
 
             if similarity < 0.7:
                 continue
@@ -360,9 +354,7 @@ Respond with JSON:
     # SHARED UTILITIES
     # ═══════════════════════════════════════════════════════════
 
-    async def check_invalidation(
-        self, memory: Memory, context: str = ""
-    ) -> InvalidationResult:
+    async def check_invalidation(self, memory: Memory, context: str = "") -> InvalidationResult:
         """
         Core invalidation check using LLM.
 
@@ -409,9 +401,7 @@ Respond with JSON:
             superseded_by=result.superseded_by,
         )
 
-    async def _mark_invalidated(
-        self, memory: Memory, result: InvalidationResult
-    ) -> Memory:
+    async def _mark_invalidated(self, memory: Memory, result: InvalidationResult) -> Memory:
         """
         Mark memory as invalidated with reasoning.
 
@@ -462,9 +452,7 @@ Respond with JSON:
         except Exception:
             return "Unable to retrieve context"
 
-    def _calculate_similarity(
-        self, embedding1: list[float], embedding2: list[float]
-    ) -> float:
+    def _calculate_similarity(self, embedding1: list[float], embedding2: list[float]) -> float:
         """
         Calculate cosine similarity between two embeddings.
 
@@ -478,7 +466,7 @@ Respond with JSON:
         import math
 
         # Dot product
-        dot_product = sum(a * b for a, b in zip(embedding1, embedding2))
+        dot_product = sum(a * b for a, b in zip(embedding1, embedding2, strict=False))
 
         # Magnitudes
         mag1 = math.sqrt(sum(a * a for a in embedding1))
@@ -488,4 +476,3 @@ Respond with JSON:
             return 0.0
 
         return dot_product / (mag1 * mag2)
-

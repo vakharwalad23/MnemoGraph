@@ -1,6 +1,7 @@
 """
 Version tracking models for memory evolution.
 """
+
 from datetime import datetime
 from typing import Any
 
@@ -59,4 +60,3 @@ class InvalidationResult(BaseModel):
     superseded_by: str | None = None
     preserve_as: str | None = None  # historical_context, etc.
     checked_at: datetime = Field(default_factory=datetime.now)
-
