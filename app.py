@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from src.config import Config
 from src.core.embeddings.ollama import OllamaEmbedder
-from src.core.graph_store.sqlite_store import SQLiteGraphStore
+from src.core.graph_store.neo4j_store import Neo4jGraphStore
 from src.core.llm.ollama import OllamaLLM
 from src.core.vector_store.qdrant import QdrantStore
 from src.services.memory_engine import MemoryEngine
@@ -121,7 +121,9 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting MnemoGraph server...")
 
     # Initialize components
-    config = Config()
+    config = Config(
+        graph_backend="neo4j",
+    )
 
     # LLM provider
     llm = OllamaLLM(
@@ -138,7 +140,9 @@ async def lifespan(app: FastAPI):
     )
 
     # Graph store (using SQLite for simplicity, can switch to Neo4j)
-    graph_store = SQLiteGraphStore(db_path="data/mnemograph.db")
+    graph_store = Neo4jGraphStore(
+        uri="bolt://localhost:7687", username="neo4j", password="password"
+    )
 
     # Vector store
     vector_store = QdrantStore(
@@ -215,7 +219,7 @@ async def add_memory(request: AddMemoryRequest):
             content=request.text,
             metadata=request.metadata or {},
         )
-        
+
         return AddMemoryResponse(
             memory_id=memory.id,
             created_at=memory.created_at.isoformat(),
@@ -251,7 +255,7 @@ async def query_memories(request: QueryMemoriesRequest):
             score_threshold=request.similarity_threshold,
             filters=request.filters,
         )
-        
+
         memory_results = []
         for memory, score in results:
             result_data = {
@@ -265,7 +269,7 @@ async def query_memories(request: QueryMemoriesRequest):
                     **memory.metadata,
                 },
             }
-            
+
             # Include relationships if requested
             if request.include_relationships:
                 neighbors = await engine.get_neighbors(memory.id, limit=10)
@@ -280,9 +284,9 @@ async def query_memories(request: QueryMemoriesRequest):
                         for n in neighbors
                     ],
                 }
-            
+
             memory_results.append(MemoryResult(**result_data))
-        
+
         return memory_results
     except Exception as e:
         logger.error(f"Error querying memories: {e}")
@@ -352,24 +356,26 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
         if request.text:
             # Update with versioning
             updated_memory, evolution = await engine.update_memory(memory_id, request.text)
-            
+
             return {
                 "id": updated_memory.id,
                 "version": updated_memory.version,
                 "action": evolution.action_taken,
                 "analysis": evolution.analysis,
-                "previous_version": evolution.current_memory.id if evolution.current_memory else None,
+                "previous_version": (
+                    evolution.current_memory.id if evolution.current_memory else None
+                ),
             }
         else:
             # Just metadata update
             memory = await engine.get_memory(memory_id, validate=False)
             if not memory:
                 raise HTTPException(status_code=404, detail="Memory not found")
-            
+
             if request.metadata:
                 memory.metadata.update(request.metadata)
                 await engine.graph_store.update_memory(memory)
-            
+
             return {"id": memory.id, "updated": True}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -405,7 +411,6 @@ async def add_conversation(request: AddConversationRequest):
 
     Creates a thread of messages with FOLLOWS relationships preserving
     the conversation order.
-    
     Note: This endpoint is under development for the new architecture.
     """
     raise HTTPException(status_code=501, detail="Conversation endpoints coming soon")
@@ -419,7 +424,6 @@ async def add_document(request: AddDocumentRequest):
 
     Splits long documents into chunks, creates hierarchical relationships,
     and infers semantic connections between chunks.
-    
     Note: This endpoint is under development for the new architecture.
     """
     raise HTTPException(status_code=501, detail="Document endpoints coming soon")

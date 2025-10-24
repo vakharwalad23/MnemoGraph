@@ -4,6 +4,7 @@ MnemoGraph Server Entry Point
 Run with: python main.py
 Or with uvicorn: uvicorn main:app --reload
 """
+
 import uvicorn
 
 if __name__ == "__main__":
