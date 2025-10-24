@@ -69,7 +69,7 @@ class MemoryEngine:
         )
 
         self.invalidation = InvalidationManager(
-            llm_provider=llm,
+            llm=llm,
             graph_store=graph_store,
             vector_store=vector_store,
         )

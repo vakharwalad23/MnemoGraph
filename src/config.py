@@ -9,7 +9,7 @@ class LLMConfig(BaseModel):
     """LLM provider configuration."""
 
     provider: str = "ollama"  # ollama, openai
-    model: str = "llama3.1"
+    model: str = "llama3.1:8b"
     base_url: str = "http://localhost:11434"
     api_key: str | None = None
     temperature: float = 0.0

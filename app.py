@@ -14,10 +14,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from src.config import Config
-from src.core.embeddings import OllamaEmbedding
-from src.core.graph_store import Neo4jGraphStore
-from src.core.vector_store import QdrantStore
-from src.services import MemoryEngine
+from src.core.embeddings.ollama import OllamaEmbedder
+from src.core.graph_store.sqlite_store import SQLiteGraphStore
+from src.core.llm.ollama import OllamaLLM
+from src.core.vector_store.qdrant import QdrantStore
+from src.services.memory_engine import MemoryEngine
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -120,26 +121,38 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting MnemoGraph server...")
 
     # Initialize components
-    config = Config(
-        relationships={
-            "auto_infer_on_add": True,
-            "semantic": {"similarity_threshold": 0.5},
-        }
+    config = Config()
+
+    # LLM provider
+    llm = OllamaLLM(
+        host="http://localhost:11434",
+        model="llama3.1:8b",
+        timeout=120.0,
     )
 
-    embedder = OllamaEmbedding(model="nomic-embed-text", host="http://localhost:11434")
+    # Embedder
+    embedder = OllamaEmbedder(
+        host="http://localhost:11434",
+        model="nomic-embed-text",
+        timeout=120.0,
+    )
 
+    # Graph store (using SQLite for simplicity, can switch to Neo4j)
+    graph_store = SQLiteGraphStore(db_path="data/mnemograph.db")
+
+    # Vector store
     vector_store = QdrantStore(
-        host="localhost", port=6333, collection_name="mnemograph_prod", vector_size=768
-    )
-
-    graph_store = Neo4jGraphStore(
-        uri="bolt://localhost:7687", user="neo4j", password="mnemograph123"
+        collection_name="mnemograph_memories",
+        vector_size=768,  # nomic-embed-text dimension
     )
 
     # Create and initialize engine
     engine = MemoryEngine(
-        vector_store=vector_store, graph_store=graph_store, embedder=embedder, config=config
+        llm=llm,
+        embedder=embedder,
+        graph_store=graph_store,
+        vector_store=vector_store,
+        config=config,
     )
 
     await engine.initialize()
@@ -178,8 +191,8 @@ async def health_check():
     return HealthResponse(
         status="healthy" if engine else "initializing",
         engine_initialized=engine is not None,
-        vector_store="Qdrant (localhost:6333)",
-        graph_store="Neo4j (bolt://localhost:7687)",
+        vector_store="Qdrant (http://localhost:6333)",
+        graph_store="SQLite (data/mnemograph.db)",
         embedding_model="nomic-embed-text (Ollama)",
     )
 
@@ -198,13 +211,23 @@ async def add_memory(request: AddMemoryRequest):
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        result = await engine.add_memory(
-            text=request.text,
-            metadata=request.metadata,
-            memory_id=request.memory_id,
-            auto_infer_relationships=request.auto_infer_relationships,
+        memory, extraction = await engine.add_memory(
+            content=request.text,
+            metadata=request.metadata or {},
         )
-        return AddMemoryResponse(**result)
+        
+        return AddMemoryResponse(
+            memory_id=memory.id,
+            created_at=memory.created_at.isoformat(),
+            text=memory.content,
+            relationships_created=len(extraction.relationships),
+            auto_infer_enabled=True,
+            engines_run={
+                "relationships": len(extraction.relationships),
+                "derived_insights": len(extraction.derived_insights),
+                "conflicts": len(extraction.conflicts),
+            },
+        )
     except Exception as e:
         logger.error(f"Error adding memory: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -222,14 +245,45 @@ async def query_memories(request: QueryMemoriesRequest):
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        results = await engine.query_memories(
+        results = await engine.search_similar(
             query=request.query,
             limit=request.limit,
-            similarity_threshold=request.similarity_threshold,
+            score_threshold=request.similarity_threshold,
             filters=request.filters,
-            include_relationships=request.include_relationships,
         )
-        return [MemoryResult(**r) for r in results]
+        
+        memory_results = []
+        for memory, score in results:
+            result_data = {
+                "id": memory.id,
+                "score": score,
+                "metadata": {
+                    "content": memory.content,
+                    "type": memory.type.value,
+                    "status": memory.status.value,
+                    "created_at": memory.created_at.isoformat(),
+                    **memory.metadata,
+                },
+            }
+            
+            # Include relationships if requested
+            if request.include_relationships:
+                neighbors = await engine.get_neighbors(memory.id, limit=10)
+                result_data["relationships"] = {
+                    "count": len(neighbors),
+                    "edges": [
+                        {
+                            "target_id": n[0].id,
+                            "type": n[1].type.value,
+                            "confidence": n[1].confidence,
+                        }
+                        for n in neighbors
+                    ],
+                }
+            
+            memory_results.append(MemoryResult(**result_data))
+        
+        return memory_results
     except Exception as e:
         logger.error(f"Error querying memories: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -246,14 +300,36 @@ async def get_memory(memory_id: str, include_relationships: bool = Query(default
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        memory = await engine.get_memory(
-            memory_id=memory_id, include_relationships=include_relationships
-        )
+        memory = await engine.get_memory(memory_id, validate=False)
 
         if not memory:
             raise HTTPException(status_code=404, detail="Memory not found")
 
-        return memory
+        result = {
+            "id": memory.id,
+            "content": memory.content,
+            "type": memory.type.value,
+            "status": memory.status.value,
+            "version": memory.version,
+            "created_at": memory.created_at.isoformat(),
+            "updated_at": memory.updated_at.isoformat(),
+            "metadata": memory.metadata,
+            "confidence": memory.confidence,
+        }
+
+        if include_relationships:
+            neighbors = await engine.get_neighbors(memory.id, limit=20)
+            result["relationships"] = [
+                {
+                    "target_id": n[0].id,
+                    "target_content": n[0].content[:100],
+                    "type": n[1].type.value,
+                    "confidence": n[1].confidence,
+                }
+                for n in neighbors
+            ]
+
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -273,13 +349,28 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        result = await engine.update_memory(
-            memory_id=memory_id,
-            text=request.text,
-            metadata=request.metadata,
-            reindex_relationships=request.reindex_relationships,
-        )
-        return result
+        if request.text:
+            # Update with versioning
+            updated_memory, evolution = await engine.update_memory(memory_id, request.text)
+            
+            return {
+                "id": updated_memory.id,
+                "version": updated_memory.version,
+                "action": evolution.action_taken,
+                "analysis": evolution.analysis,
+                "previous_version": evolution.current_memory.id if evolution.current_memory else None,
+            }
+        else:
+            # Just metadata update
+            memory = await engine.get_memory(memory_id, validate=False)
+            if not memory:
+                raise HTTPException(status_code=404, detail="Memory not found")
+            
+            if request.metadata:
+                memory.metadata.update(request.metadata)
+                await engine.graph_store.update_memory(memory)
+            
+            return {"id": memory.id, "updated": True}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
@@ -299,14 +390,14 @@ async def delete_memory(memory_id: str):
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        result = await engine.delete_memory(memory_id=memory_id)
-        return result
+        await engine.delete_memory(memory_id)
+        return {"id": memory_id, "deleted": True}
     except Exception as e:
         logger.error(f"Error deleting memory: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-# Conversation endpoints
+# Conversation endpoints (Coming soon)
 @app.post("/conversations")
 async def add_conversation(request: AddConversationRequest):
     """
@@ -314,22 +405,13 @@ async def add_conversation(request: AddConversationRequest):
 
     Creates a thread of messages with FOLLOWS relationships preserving
     the conversation order.
+    
+    Note: This endpoint is under development for the new architecture.
     """
-    if not engine:
-        raise HTTPException(status_code=503, detail="Engine not initialized")
-
-    try:
-        messages = [{"text": msg.text, "role": msg.role} for msg in request.messages]
-        result = await engine.add_conversation(
-            messages=messages, conversation_id=request.conversation_id, metadata=request.metadata
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error adding conversation: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    raise HTTPException(status_code=501, detail="Conversation endpoints coming soon")
 
 
-# Document endpoints
+# Document endpoints (Coming soon)
 @app.post("/documents")
 async def add_document(request: AddDocumentRequest):
     """
@@ -337,22 +419,10 @@ async def add_document(request: AddDocumentRequest):
 
     Splits long documents into chunks, creates hierarchical relationships,
     and infers semantic connections between chunks.
+    
+    Note: This endpoint is under development for the new architecture.
     """
-    if not engine:
-        raise HTTPException(status_code=503, detail="Engine not initialized")
-
-    try:
-        result = await engine.add_document(
-            text=request.text,
-            chunk_size=request.chunk_size,
-            chunk_overlap=request.chunk_overlap,
-            document_id=request.document_id,
-            metadata=request.metadata,
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Error adding document: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    raise HTTPException(status_code=501, detail="Document endpoints coming soon")
 
 
 # Statistics endpoint
@@ -367,8 +437,8 @@ async def get_stats():
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        # This is a placeholder - you'd implement actual stats gathering
-        return {"status": "operational", "message": "Statistics endpoint - to be implemented"}
+        stats = await engine.get_statistics()
+        return stats
     except Exception as e:
         logger.error(f"Error getting stats: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
