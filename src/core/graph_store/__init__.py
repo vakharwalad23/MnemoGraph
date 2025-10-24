@@ -1,13 +1,18 @@
-"""Graph store implementations."""
+"""
+Graph store implementations for MnemoGraph.
 
-from .base import GraphStore
-from .factory import create_graph_store
-from .neo4j_store import Neo4jGraphStore
-from .sqlite_store import SQLiteGraphStore
+Provides abstract base and concrete implementations for graph storage.
+
+Available backends:
+- SQLiteGraphStore: Lightweight, embedded graph database
+- Neo4jGraphStore: Production-grade, distributed graph database
+"""
+from src.core.graph_store.base import GraphStore
+from src.core.graph_store.neo4j_store import Neo4jGraphStore
+from src.core.graph_store.sqlite_store import SQLiteGraphStore
 
 __all__ = [
     "GraphStore",
     "SQLiteGraphStore",
     "Neo4jGraphStore",
-    "create_graph_store",
 ]

@@ -1,10 +1,13 @@
-"""Base interface for graph storage."""
+"""
+Base interface for graph storage - redesigned for Phase 2 & 3.
 
+Clean interface that works with new Memory model and relationship system.
+"""
 from abc import ABC, abstractmethod
-from datetime import datetime
 from typing import Any
 
-from src.models import MemoryStatus, Node, NodeType, RelationshipType
+from src.models.memory import Memory
+from src.models.relationships import Edge
 
 
 class GraphStore(ABC):
@@ -15,43 +18,100 @@ class GraphStore(ABC):
         """Initialize the graph store (create tables/schema)."""
         pass
 
+    # ═══════════════════════════════════════════════════════════
+    # NODE OPERATIONS (Memory nodes)
+    # ═══════════════════════════════════════════════════════════
+
     @abstractmethod
-    async def add_node(
-        self,
-        node_id: str,
-        node_type: NodeType,
-        data: dict[str, Any],
-        status: MemoryStatus = MemoryStatus.NEW,
-    ) -> None:
+    async def add_node(self, memory: Memory) -> None:
         """
-        Add a node to the graph.
+        Add a memory node to the graph.
 
         Args:
-            node_id: Unique node identifier
-            node_type: Type of the node
-            data: Node data as dictionary
-            status: Memory status
+            memory: Memory object to store
         """
         pass
 
     @abstractmethod
-    async def add_edge(
+    async def get_node(self, node_id: str) -> Memory | None:
+        """
+        Retrieve a memory node by ID.
+
+        Args:
+            node_id: Node identifier
+
+        Returns:
+            Memory or None if not found
+        """
+        pass
+
+    @abstractmethod
+    async def update_node(self, memory: Memory) -> None:
+        """
+        Update an existing memory node.
+
+        Args:
+            memory: Updated memory object
+        """
+        pass
+
+    @abstractmethod
+    async def delete_node(self, node_id: str) -> None:
+        """
+        Delete a node and its edges.
+
+        Args:
+            node_id: Node identifier
+        """
+        pass
+
+    @abstractmethod
+    async def query_memories(
         self,
-        source_id: str,
-        target_id: str,
-        edge_type: RelationshipType,
-        weight: float = 1.0,
-        metadata: dict[str, Any] | None = None,
-    ) -> str:
+        filters: dict[str, Any] | None = None,
+        order_by: str | None = None,
+        limit: int = 100,
+    ) -> list[Memory]:
+        """
+        Query memories with filters.
+
+        Args:
+            filters: Filter conditions (e.g., {"status": "active", "created_after": "2024-01-01"})
+            order_by: Sort order (e.g., "created_at DESC")
+            limit: Maximum results
+
+        Returns:
+            List of matching memories
+        """
+        pass
+
+    @abstractmethod
+    async def get_random_memories(
+        self, filters: dict[str, Any] | None = None, limit: int = 10
+    ) -> list[Memory]:
+        """
+        Get random memories for sampling.
+
+        Args:
+            filters: Optional filters
+            limit: Number of memories
+
+        Returns:
+            List of random memories
+        """
+        pass
+
+    # ═══════════════════════════════════════════════════════════
+    # EDGE OPERATIONS (Relationships)
+    # ═══════════════════════════════════════════════════════════
+
+    @abstractmethod
+    async def add_edge(self, edge: dict[str, Any] | Edge) -> str:
         """
         Add an edge between two nodes.
 
         Args:
-            source_id: Source node ID
-            target_id: Target node ID
-            edge_type: Type of relationship
-            weight: Edge weight
-            metadata: Additional edge metadata
+            edge: Edge dict or Edge object with source, target, type, metadata
 
         Returns:
             Edge ID
@@ -59,88 +119,89 @@ class GraphStore(ABC):
         pass
 
     @abstractmethod
-    async def get_node(self, node_id: str) -> Node | None:
+    async def get_edge(self, edge_id: str) -> dict[str, Any] | None:
         """
-        Retrieve a node by ID.
+        Get edge by ID.
 
         Args:
-            node_id: Node identifier
+            edge_id: Edge identifier
 
         Returns:
-            Node or None if not found
+            Edge dict or None
         """
         pass
+
+    @abstractmethod
+    async def get_edge_between(
+        self, source_id: str, target_id: str, relationship_type: str | None = None
+    ) -> dict[str, Any] | None:
+        """
+        Find edge between two nodes.
+
+        Args:
+            source_id: Source node ID
+            target_id: Target node ID
+            relationship_type: Optional filter by type
+
+        Returns:
+            Edge dict or None
+        """
+        pass
+
+    @abstractmethod
+    async def update_edge(self, edge: dict[str, Any]) -> None:
+        """
+        Update edge metadata.
+
+        Args:
+            edge: Edge dict with id and updated fields
+        """
+        pass
+
+    @abstractmethod
+    async def delete_edge(self, edge_id: str) -> None:
+        """
+        Delete an edge.
+
+        Args:
+            edge_id: Edge identifier
+        """
+        pass
+
+    # ═══════════════════════════════════════════════════════════
+    # GRAPH TRAVERSAL
+    # ═══════════════════════════════════════════════════════════
 
     @abstractmethod
     async def get_neighbors(
         self,
         node_id: str,
-        edge_types: list[RelationshipType] | None = None,
+        relationship_types: list[str] | None = None,
         direction: str = "outgoing",
+        depth: int = 1,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
         """
         Get neighboring nodes.
 
         Args:
             node_id: Node identifier
-            edge_types: Filter by specific edge types
+            relationship_types: Filter by specific types
             direction: "outgoing", "incoming", or "both"
+            depth: Traversal depth
+            limit: Maximum results
 
         Returns:
-            List of neighbor nodes with edge information
+            List of neighbor dicts with 'node' and 'edge' keys
         """
         pass
 
     @abstractmethod
-    async def update_node_status(self, node_id: str, status: MemoryStatus) -> None:
+    async def find_path(
+        self, start_id: str, end_id: str, max_depth: int = 5
+    ) -> list[str] | None:
         """
-        Update node status.
-
-        Args:
-            node_id: Node identifier
-            status: New status
-        """
-        pass
-
-    @abstractmethod
-    async def update_node_access(
-        self, node_id: str, access_count: int, last_accessed: datetime
-    ) -> None:
-        """
-        Update node access tracking.
-
-        Args:
-            node_id: Node identifier
-            access_count: Updated access count
-            last_accessed: Last access timestamp
-        """
-        pass
-
-    @abstractmethod
-    async def update_edge_weight(self, edge_id: str, weight: float) -> None:
-        """
-        Update edge weight.
-
-        Args:
-            edge_id: Edge identifier
-            weight: New weight
-        """
-        pass
-
-    @abstractmethod
-    async def mark_forgotten(self, node_id: str) -> None:
-        """
-        Mark a node as forgotten.
-
-        Args:
-            node_id: Node identifier
-        """
-        pass
-
-    @abstractmethod
-    async def find_path(self, start_id: str, end_id: str, max_depth: int = 3) -> list[str] | None:
-        """
-        Find path between two nodes.
+        Find shortest path between two nodes.
 
         Args:
             start_id: Start node ID
@@ -152,13 +213,35 @@ class GraphStore(ABC):
         """
         pass
 
+    # ═══════════════════════════════════════════════════════════
+    # UTILITY METHODS
+    # ═══════════════════════════════════════════════════════════
+
     @abstractmethod
-    async def delete_node(self, node_id: str) -> None:
+    async def count_nodes(self, filters: dict[str, Any] | None = None) -> int:
         """
-        Delete a node and its edges.
+        Count nodes matching filters.
 
         Args:
-            node_id: Node identifier
+            filters: Optional filter conditions
+
+        Returns:
+            Count of nodes
+        """
+        pass
+
+    @abstractmethod
+    async def count_edges(
+        self, relationship_type: str | None = None
+    ) -> int:
+        """
+        Count edges.
+
+        Args:
+            relationship_type: Optional filter by type
+
+        Returns:
+            Count of edges
         """
         pass
 
