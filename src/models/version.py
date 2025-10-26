@@ -53,10 +53,29 @@ class VersionChain(BaseModel):
 class InvalidationResult(BaseModel):
     """Result of memory invalidation check."""
 
-    memory_id: str
-    status: str  # active, historical, superseded, invalidated
-    reasoning: str
-    confidence: float
-    superseded_by: str | None = None
-    preserve_as: str | None = None  # historical_context, etc.
+    model_config = {"extra": "ignore"}
+
+    memory_id: str = Field(..., description="REQUIRED: The ID of the memory being checked")
+    status: str = Field(
+        ...,
+        description="REQUIRED: The determined status. Must be exactly one of: 'active', 'historical', 'superseded', or 'invalidated'",
+    )
+    reasoning: str = Field(
+        ...,
+        description="REQUIRED: Clear explanation of why this status was assigned. Include specific reasons and evidence.",
+    )
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="REQUIRED: Confidence score between 0.0 and 1.0. Higher values mean more certain about the invalidation decision.",
+    )
+    superseded_by: str | None = Field(
+        default=None,
+        description="OPTIONAL: If status is 'superseded', provide the ID of the memory that supersedes this one",
+    )
+    preserve_as: str | None = Field(
+        default=None,
+        description="OPTIONAL: If memory should be preserved, specify the category (e.g., 'historical_context', 'reference_data')",
+    )
     checked_at: datetime = Field(default_factory=datetime.now)

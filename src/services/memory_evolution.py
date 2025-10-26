@@ -10,7 +10,7 @@ Handles:
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.core.embeddings.base import Embedder
 from src.core.graph_store.base import GraphStore
@@ -22,10 +22,26 @@ from src.models.version import MemoryEvolution, VersionChain, VersionChange
 class EvolutionAnalysis(BaseModel):
     """LLM analysis of how to evolve a memory."""
 
-    action: str  # update, augment, replace, preserve
-    reasoning: str
-    change_description: str
-    confidence: float
+    model_config = {"extra": "ignore"}  # Ignore extra fields from LLM
+
+    action: str = Field(
+        ...,
+        description="REQUIRED: The action to take. Must be exactly one of: 'update', 'augment', 'replace', or 'preserve'",
+    )
+    reasoning: str = Field(
+        ...,
+        description="REQUIRED: Detailed explanation of why this action is appropriate. Include specific details about what changed and why.",
+    )
+    change_description: str = Field(
+        ...,
+        description="REQUIRED: Brief description of what changed (1-2 sentences). Example: 'Updated location from Paris to London' or 'Added new skill: Python programming'",
+    )
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="REQUIRED: Confidence score between 0.0 and 1.0. Use 1.0 for certain changes, 0.5-0.8 for probable changes, <0.5 for uncertain changes.",
+    )
 
 
 class MemoryEvolutionService:
@@ -167,11 +183,15 @@ Determine the best action:
 3. "replace" - New info completely replaces the memory (create new version)
 4. "preserve" - New info contradicts; both should be kept as separate memories
 
-Respond with JSON:
-- action: update|augment|replace|preserve
-- reasoning: Why this action is appropriate
-- change_description: Brief description of what changed
-- confidence: 0.0-1.0 confidence in this decision
+You MUST respond with valid JSON containing ALL required fields:
+{{
+  "action": "update|augment|replace|preserve",
+  "reasoning": "Detailed explanation of why this action is appropriate",
+  "change_description": "Brief description of what changed (1-2 sentences)",
+  "confidence": 0.8
+}}
+
+All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
 """
 
         result = await self.llm.complete(prompt, response_format=EvolutionAnalysis, temperature=0.0)
@@ -284,10 +304,9 @@ Respond with JSON:
         Returns:
             List of memories valid at that time
         """
-        # Get candidates from vector search
-        candidates = await self.graph_store.search_memories(
-            embedding=query_embedding, limit=limit * 2  # Get more for filtering
-        )
+        # Get candidates from graph query
+        # Note: SQLite doesn't support embedding-based search, so we get all and filter
+        candidates = await self.graph_store.query_memories(limit=limit * 2)
 
         # Filter to memories valid at specified time
         valid_memories = []

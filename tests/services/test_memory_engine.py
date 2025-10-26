@@ -77,7 +77,8 @@ class TestMemoryEngineSQLite:
 
         # Stores should be initialized
         assert sqlite_graph_store.connection is not None
-        assert mock_vector_store.initialized is True
+        # Qdrant doesn't have an 'initialized' attribute, but we can check client
+        assert mock_vector_store.client is not None
 
     async def test_add_memory_sqlite(
         self, mock_llm, mock_embedder, sqlite_graph_store, mock_vector_store, config

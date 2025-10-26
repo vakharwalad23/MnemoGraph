@@ -421,12 +421,15 @@ class SQLiteGraphStore(GraphStore):
         results = []
         for row in rows:
             # Extract node columns
-            node = self._row_to_memory(row[:17])  # First 17 columns are node data
+            # First 17 columns are node data
+            node = self._row_to_memory(row[:17])
 
             # Create proper Edge object
             edge = Edge(
-                source=row[20] if direction == "outgoing" else node.id,  # source_id
-                target=node.id if direction == "outgoing" else row[20],  # target_id
+                # source_id
+                source=row[20] if direction == "outgoing" else node.id,
+                # target_id
+                target=node.id if direction == "outgoing" else row[20],
                 type=RelationshipType(row[18]),  # edge_type
                 confidence=row[21] if len(row) > 21 else 1.0,  # confidence
                 created_at=(
@@ -497,13 +500,13 @@ class SQLiteGraphStore(GraphStore):
 
             visited.add(current_id)
 
-            # Get neighbors
+            # Get neighbors - returns list[tuple[Memory, Edge]]
             neighbors = await self.get_neighbors(
                 current_id, direction="outgoing", depth=1, limit=100
             )
 
-            for neighbor in neighbors:
-                neighbor_id = neighbor["node"].id
+            for neighbor_memory, _ in neighbors:
+                neighbor_id = neighbor_memory.id
 
                 if neighbor_id == end_id:
                     return path + [neighbor_id]

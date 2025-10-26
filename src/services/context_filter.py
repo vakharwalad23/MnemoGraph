@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.config import Config
 from src.core.graph_store.base import GraphStore
@@ -23,9 +23,19 @@ from src.models.relationships import ContextBundle
 class RelevanceScore(BaseModel):
     """Relevance score from LLM pre-filter."""
 
-    id: str
-    relevance: float
-    reason: str
+    model_config = {"extra": "ignore"}
+
+    id: str = Field(..., description="REQUIRED: The ID of the memory being scored")
+    relevance: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="REQUIRED: Relevance score between 0.0 and 1.0. Use 1.0 for highly relevant, 0.7-0.9 for relevant, 0.4-0.7 for somewhat relevant, <0.4 for not relevant",
+    )
+    reason: str = Field(
+        ...,
+        description="REQUIRED: Brief explanation of why this relevance score was assigned. Mention specific aspects that make it relevant or not.",
+    )
 
 
 class MultiStageFilter:

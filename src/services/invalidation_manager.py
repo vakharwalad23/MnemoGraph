@@ -12,7 +12,7 @@ Three strategies:
 import asyncio
 from datetime import datetime, timedelta
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
@@ -90,10 +90,13 @@ class InvalidationManager:
 
         # Check if already invalidated
         if memory.status != MemoryStatus.ACTIVE:
+            await self.graph_store.update_node(memory)
             return memory
 
         # Decide if validation is needed
         if not self._should_validate(memory):
+            # Still update access tracking even if not validating
+            await self.graph_store.update_node(memory)
             return memory
 
         # Perform validation
@@ -326,8 +329,15 @@ Respond with JSON:
 """
 
             class SupersessionAnalysis(BaseModel):
-                action: str
-                reasoning: str
+                model_config = {"extra": "ignore"}
+                action: str = Field(
+                    ...,
+                    description="REQUIRED: Must be exactly 'supersede' if the new memory replaces the candidate, or 'keep_both' if both should remain active",
+                )
+                reasoning: str = Field(
+                    ...,
+                    description="REQUIRED: Clear explanation of why this decision was made. Explain the relationship between the memories.",
+                )
 
             try:
                 result = await self.llm.complete(

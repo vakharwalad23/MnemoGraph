@@ -68,20 +68,46 @@ class Edge(BaseModel):
 class Relationship(BaseModel):
     """Individual relationship between memories."""
 
-    type: RelationshipType
-    target_id: str
-    confidence: float
-    reasoning: str
+    model_config = {"extra": "ignore"}
+
+    type: RelationshipType = Field(
+        ...,
+        description="REQUIRED: The type of relationship. Must be one of the valid RelationshipType enum values (RELATES_TO, CAUSED_BY, CONFLICTS_WITH, etc.)",
+    )
+    target_id: str = Field(
+        ..., description="REQUIRED: The ID of the target memory that this relationship points to"
+    )
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="REQUIRED: Confidence score between 0.0 and 1.0. Use 1.0 for explicit relationships, 0.7-0.9 for strong inferences, 0.5-0.7 for weak inferences",
+    )
+    reasoning: str = Field(
+        ...,
+        description="REQUIRED: Explain why this relationship exists. Provide specific evidence from both memories.",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Conflict(BaseModel):
     """Conflict between memories."""
 
-    target_id: str
-    conflict_type: str
-    resolution: str
-    reasoning: str
+    model_config = {"extra": "ignore"}
+
+    target_id: str = Field(..., description="REQUIRED: The ID of the conflicting memory")
+    conflict_type: str = Field(
+        ...,
+        description="REQUIRED: Type of conflict (e.g., 'factual_contradiction', 'temporal_inconsistency', 'logical_conflict')",
+    )
+    resolution: str = Field(
+        ...,
+        description="REQUIRED: How this conflict should be resolved (e.g., 'prefer_newer', 'prefer_more_confident', 'keep_both')",
+    )
+    reasoning: str = Field(
+        ...,
+        description="REQUIRED: Explain the nature of the conflict and why this resolution approach is appropriate",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -90,11 +116,30 @@ class DerivedInsight(BaseModel):
     LLM-generated insight derived from multiple memories.
     """
 
-    content: str
-    confidence: float
-    reasoning: str
-    source_ids: list[str]
-    type: str  # pattern_recognition, summary, inference, abstraction
+    model_config = {"extra": "ignore"}
+
+    content: str = Field(
+        ...,
+        description="REQUIRED: The actual insight content. Should be a clear, concise statement of the discovered pattern or conclusion.",
+    )
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="REQUIRED: Confidence in this insight between 0.0 and 1.0. Higher for insights with strong supporting evidence.",
+    )
+    reasoning: str = Field(
+        ...,
+        description="REQUIRED: Explain how this insight was derived from the source memories. Include specific evidence.",
+    )
+    source_ids: list[str] = Field(
+        ...,
+        description="REQUIRED: List of memory IDs that contributed to this insight. Must include at least one ID.",
+    )
+    type: str = Field(
+        ...,
+        description="REQUIRED: Type of insight. Must be one of: 'pattern_recognition', 'summary', 'inference', 'abstraction'",
+    )
 
 
 class RelationshipBundle(BaseModel):
@@ -102,18 +147,40 @@ class RelationshipBundle(BaseModel):
     Complete set of relationships extracted for a memory.
     """
 
-    memory_id: str
-    relationships: list[Relationship] = Field(default_factory=list)
-    derived_insights: list[DerivedInsight] = Field(default_factory=list)
-    conflicts: list[Conflict] = Field(default_factory=list)
-    overall_analysis: str = ""
-    extraction_time_ms: float = 0.0
+    model_config = {"extra": "ignore"}
+
+    memory_id: str = Field(
+        ...,
+        description="REQUIRED: The ID of the memory for which relationships are being extracted",
+    )
+    relationships: list[Relationship] = Field(
+        default_factory=list,
+        description="OPTIONAL: List of direct relationships to other memories. Can be empty if no relationships found.",
+    )
+    derived_insights: list[DerivedInsight] = Field(
+        default_factory=list,
+        description="OPTIONAL: List of insights derived from analyzing multiple memories together. Can be empty.",
+    )
+    conflicts: list[Conflict] = Field(
+        default_factory=list,
+        description="OPTIONAL: List of conflicts with other memories. Can be empty if no conflicts found.",
+    )
+    overall_analysis: str = Field(
+        default="",
+        description="OPTIONAL: High-level summary of the relationship analysis. Provide overview of key findings.",
+    )
+    extraction_time_ms: float = Field(
+        default=0.0,
+        description="OPTIONAL: Time taken to extract relationships in milliseconds. For internal tracking.",
+    )
 
 
 class ContextBundle(BaseModel):
     """
     Complete context gathered for relationship extraction.
     """
+
+    model_config = {"extra": "ignore"}  # Ignore extra fields
 
     vector_candidates: list[Memory] = Field(default_factory=list)  # Top vector matches
     temporal_context: list[Memory] = Field(default_factory=list)  # Recent memories
