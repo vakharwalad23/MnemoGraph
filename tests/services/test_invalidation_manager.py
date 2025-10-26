@@ -157,11 +157,14 @@ class TestInvalidationManagerSQLite:
         # Add memory to store
         await sqlite_graph_store.add_node(sample_memory)
 
+        # Save original count before validation
+        original_count = sample_memory.access_count
+
         # Validate on access
         result = await manager.validate_on_access(sample_memory)
 
         assert result.id == sample_memory.id
-        assert result.access_count == sample_memory.access_count + 1
+        assert result.access_count == original_count + 1
 
     async def test_validate_on_access_already_invalidated(
         self, mock_llm, sqlite_graph_store, mock_vector_store

@@ -375,7 +375,7 @@ class TestBuildExtractionPrompt:
         from src.models.relationships import ContextBundle
 
         context = ContextBundle(
-            vector_candidates=sample_memory,
+            vector_candidates=[sample_memory],
             filtered_candidates=[sample_memory],
         )
 

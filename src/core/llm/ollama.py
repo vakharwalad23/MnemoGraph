@@ -75,20 +75,44 @@ class OllamaLLM(LLMProvider):
         if response_format:
             format_type = "json"
 
-            # Enhance prompt with schema for better results
+            # Create simple example from schema instead of full schema
             schema = response_format.model_json_schema()
-            schema_str = json.dumps(schema, indent=2)
+
+            # Build example JSON structure from schema properties
+            example = {}
+            properties = schema.get("properties", {})
+
+            for field_name, field_info in properties.items():
+                field_type = field_info.get("type", "string")
+
+                # Create example values based on type
+                if field_type == "string":
+                    example[field_name] = f"<{field_name}>"
+                elif field_type == "number" or field_type == "integer":
+                    example[field_name] = (
+                        0.5 if "confidence" in field_name or "relevance" in field_name else 1
+                    )
+                elif field_type == "boolean":
+                    example[field_name] = True
+                elif field_type == "array":
+                    example[field_name] = []
+                elif field_type == "object":
+                    example[field_name] = {}
+                else:
+                    example[field_name] = None
+
+            example_str = json.dumps(example, indent=2)
 
             enhanced_prompt = f"""{prompt}
 
-Respond with valid JSON matching this exact schema:
-{schema_str}
+You MUST respond with valid JSON matching this structure:
+{example_str}
 
-Requirements:
-- Use exact field names from schema
-- Match data types exactly
-- Include all required fields
-- Return ONLY valid JSON, no markdown or extra text"""
+IMPORTANT:
+- Replace placeholder values like "<field_name>" with actual content
+- All fields marked as REQUIRED in descriptions must be included
+- Return ONLY valid JSON, no markdown formatting or extra text
+- Do not return the schema itself, return actual data"""
 
             messages = [{"role": "user", "content": enhanced_prompt}]
 
@@ -108,12 +132,24 @@ Requirements:
             try:
                 # Clean JSON if wrapped in markdown
                 cleaned = self._extract_json(content)
+
+                # Debug: Check if LLM returned schema instead of data
+                try:
+                    parsed = json.loads(cleaned)
+                    if isinstance(parsed, dict) and "properties" in parsed and "type" in parsed:
+                        raise ValueError(
+                            "LLM returned the JSON schema instead of actual data. "
+                            "This usually means the prompt needs to be clearer about expecting actual values, not the schema definition."
+                        )
+                except json.JSONDecodeError:
+                    pass  # Will be caught below
+
                 return response_format.model_validate_json(cleaned)
             except Exception as e:
                 raise ValueError(
                     f"Failed to parse structured output: {e}\n"
-                    f"Raw response: {content}\n"
-                    f"Expected schema: {response_format.model_json_schema()}"
+                    f"Raw response (first 500 chars): {content[:500]}\n"
+                    f"Expected format: {response_format.__name__}"
                 ) from e
 
         return content
