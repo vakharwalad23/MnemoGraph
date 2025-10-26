@@ -1,77 +1,102 @@
-"""Ollama embedding provider using official Ollama SDK."""
+"""
+Ollama embedder using native ollama-python SDK.
+"""
 
+import asyncio
 
 import ollama
 
-from .base import EmbeddingProvider
+from src.core.embeddings.base import Embedder
 
 
-class OllamaEmbedding(EmbeddingProvider):
-    """Ollama-based embedding provider using official SDK."""
+class OllamaEmbedder(Embedder):
+    """
+    Ollama embedder for generating text embeddings.
+
+    Uses native ollama-python SDK for embedding generation.
+    Supports models like nomic-embed-text, mxbai-embed-large, etc.
+    """
 
     def __init__(
         self,
-        model: str = "nomic-embed-text",
         host: str = "http://localhost:11434",
+        model: str = "nomic-embed-text",
+        timeout: float = 120.0,
     ):
         """
-        Initialize Ollama embedding provider.
+        Initialize Ollama embedder.
 
         Args:
-            model: Name of the Ollama model to use
-            host: Host URL of the Ollama service
+            host: Ollama server URL
+            model: Embedding model name (e.g., "nomic-embed-text", "mxbai-embed-large")
+            timeout: Request timeout in seconds
         """
-        self.model = model
         self.host = host
-        self._dimension: int | None = None
-        # Initialize client with custom host
-        self.client = ollama.Client(host=host)
+        self.model = model
+        self.timeout = timeout
+        self._dimension = None  # Cache dimension
 
-    async def embed(self, text: str) -> list[float]:
+        # Create async client
+        self.client = ollama.AsyncClient(host=host)
+
+    async def embed(self, text: str, **kwargs) -> list[float]:
         """
-        Generate embedding for a single text.
+        Generate embedding for text using Ollama.
 
         Args:
-            text: Input text to embed
+            text: Text to embed
+            **kwargs: Additional options passed to Ollama
 
         Returns:
             Embedding vector as list of floats
         """
-        response = self.client.embeddings(model=self.model, prompt=text)
-        embedding = response["embedding"]
+        response = await self.client.embeddings(model=self.model, prompt=text, **kwargs)
 
-        # Cache dimension
-        if self._dimension is None:
-            self._dimension = len(embedding)
+        return response["embedding"]
 
-        return embedding
-
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+    async def batch_embed(
+        self, texts: list[str], batch_size: int = 32, **kwargs
+    ) -> list[list[float]]:
         """
-        Generate embeddings for multiple texts.
+        Batch embed multiple texts with concurrency.
+
+        Ollama processes requests sequentially on server,
+        but we use asyncio for concurrent requests.
 
         Args:
-            texts: List of input texts to embed
+            texts: List of texts to embed
+            batch_size: Number of concurrent requests
+            **kwargs: Additional options
 
         Returns:
             List of embedding vectors
         """
         embeddings = []
-        for text in texts:
-            response = self.client.embeddings(model=self.model, prompt=text)
-            embedding = response["embedding"]
-            embeddings.append(embedding)
 
-            # Cache dimension from first embedding
-            if self._dimension is None and embedding:
-                self._dimension = len(embedding)
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+
+            # Process batch concurrently
+            tasks = [self.embed(text, **kwargs) for text in batch]
+            batch_embeddings = await asyncio.gather(*tasks)
+
+            embeddings.extend(batch_embeddings)
 
         return embeddings
 
-    @property
-    def dimension(self) -> int:
-        """Return the dimension of the embedding vectors."""
+    async def get_dimension(self) -> int:
+        """
+        Get embedding dimension.
+        Caches result after first call.
+
+        Returns:
+            Embedding vector dimension
+        """
         if self._dimension is None:
-            # Default dimension for nomic-embed-text
-            return 768 if "nomic" in self.model else 384
+            test_embedding = await self.embed("test")
+            self._dimension = len(test_embedding)
         return self._dimension
+
+    async def close(self):
+        """Close client (Ollama SDK handles cleanup internally)."""
+        pass

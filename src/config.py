@@ -1,166 +1,112 @@
-"""Configuration management for MnemoGraph."""
+"""
+Configuration for MnemoGraph V2.
+"""
 
-import os
-from typing import Any, Literal
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
-class EmbeddingConfig(BaseModel):
-    """Embedding provider configuration."""
+class LLMConfig(BaseModel):
+    """LLM provider configuration."""
 
-    provider: Literal["ollama", "openai", "sentence-transformer"] = "ollama"
-    model: str = "nomic-embed-text"
-    host: str | None = "http://localhost:11434"
+    provider: str = "ollama"  # ollama, openai
+    model: str = "llama3.1:8b"
+    base_url: str = "http://localhost:11434"
     api_key: str | None = None
-    vector_size: int = 768
+    temperature: float = 0.0
+    max_tokens: int = 2000
+    timeout: float = 120.0
 
 
-class VectorStoreConfig(BaseModel):
-    """Vector database configuration."""
+class EmbedderConfig(BaseModel):
+    """Embedder configuration."""
 
-    host: str = "localhost"
-    port: int = 6333
+    provider: str = "ollama"  # ollama, openai
+    model: str = "nomic-embed-text"
+    base_url: str = "http://localhost:11434"
+    api_key: str | None = None
+    timeout: float = 120.0
+
+
+class LLMRelationshipConfig(BaseModel):
+    """LLM relationship extraction configuration."""
+
+    min_confidence: float = 0.5
+    min_derived_confidence: float = 0.7
+    context_window: int = 50
+    recent_window_days: int = 30
+    graph_depth: int = 2
+    enable_derived_memories: bool = True
+    enable_auto_invalidation: bool = True
+
+
+class MemoryEvolutionConfig(BaseModel):
+    """Memory versioning configuration."""
+
+    preserve_history: bool = True
+    auto_detect_updates: bool = True
+    max_version_history: int = 100
+    enable_time_travel: bool = True
+
+
+class QdrantConfig(BaseModel):
+    """Optimized Qdrant configuration."""
+
+    url: str = "http://localhost:6333"
     collection_name: str = "memories"
-    vector_size: int = 768
+    use_grpc: bool = True
+    hnsw_m: int = 16
+    hnsw_ef_construct: int = 100
+    use_quantization: bool = True
+    quantization_type: str = "int8"
+    on_disk: bool = False
+    batch_size: int = 100
+    timeout: int = 30
 
 
-class GraphStoreConfig(BaseModel):
-    """Graph database configuration."""
+class Neo4jConfig(BaseModel):
+    """Neo4j graph database configuration."""
 
-    backend: Literal["sqlite", "neo4j"] = "sqlite"
-
-    # SQLite options
-    db_path: str = "mnemograph.db"
-
-    # Neo4j options
-    uri: str | None = "bolt://localhost:7687"
-    user: str | None = "neo4j"
-    password: str | None = None
+    uri: str = "bolt://localhost:7687"
+    username: str = "neo4j"
+    password: str = "password"
+    database: str = "neo4j"
 
 
-class SemanticConfig(BaseModel):
-    """Semantic similarity configuration."""
+class SQLiteConfig(BaseModel):
+    """SQLite graph database configuration."""
 
-    similarity_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    max_similar_memories: int = 10
-
-
-class TemporalConfig(BaseModel):
-    """Temporal relationship configuration."""
-
-    new_memory_window_hours: int = 48
-    update_similarity_threshold: float = 0.65
-    update_time_window_days: int = 7
-    decay_half_life_days: int = 30
-    expiring_threshold_days: int = 30
+    db_path: str = "data/mnemo_graph.db"
 
 
-class HierarchicalConfig(BaseModel):
-    """Hierarchical relationship configuration."""
+class ClusteringConfig(BaseModel):
+    """Adaptive clustering configuration."""
 
-    min_cluster_size: int = 2
-    num_topics: int = 3
-    abstraction_threshold: float = 0.6
-
-
-class CooccurrenceConfig(BaseModel):
-    """Entity co-occurrence configuration."""
-
-    min_entity_length: int = 2
-    min_cooccurrence_count: int = 1
-    entity_weight_threshold: float = 0.1
-    use_spacy: bool = True
-
-
-class CausalConfig(BaseModel):
-    """Causal/sequential relationship configuration."""
-
-    max_sequence_gap_seconds: int = 3600
-    similarity_threshold: float = 0.6
-    topic_shift_threshold: float = 0.4
-
-
-class DecayConfig(BaseModel):
-    """Memory decay configuration."""
-
-    enabled: bool = True
-    decay_half_life_days: float = 30.0
-    new_memory_threshold_hours: float = 48.0
-    expiring_threshold: float = 0.6
-    forgotten_threshold: float = 0.9
-    time_weight: float = 0.4
-    access_weight: float = 0.3
-    connectivity_weight: float = 0.3
-
-
-class RelationshipConfig(BaseModel):
-    """All relationship inference configurations."""
-
-    auto_infer_on_add: bool = True
-    semantic: SemanticConfig = Field(default_factory=SemanticConfig)
-    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
-    hierarchical: HierarchicalConfig = Field(default_factory=HierarchicalConfig)
-    cooccurrence: CooccurrenceConfig = Field(default_factory=CooccurrenceConfig)
-    causal: CausalConfig = Field(default_factory=CausalConfig)
-
-
-class BackgroundWorkerConfig(BaseModel):
-    """Background worker configuration."""
-
-    enable_decay_worker: bool = True
-    decay_interval_hours: int = 24
-
-    enable_reindexing_worker: bool = False
-    reindexing_interval_days: int = 7
-
-    enable_cleanup_worker: bool = True
-    cleanup_interval_hours: int = 168  # Weekly
-    cleanup_grace_period_days: int = 90
+    algorithm: str = "hdbscan"  # hdbscan, llm
+    min_cluster_size: int = 3
+    min_samples: int = 2
+    use_llm_naming: bool = True
+    max_clusters: int | None = None
 
 
 class Config(BaseModel):
-    """Main MnemoGraph configuration."""
+    """Main configuration."""
 
-    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
-    vector_store: VectorStoreConfig = Field(default_factory=VectorStoreConfig)
-    graph_store: GraphStoreConfig = Field(default_factory=GraphStoreConfig)
-    relationships: RelationshipConfig = Field(default_factory=RelationshipConfig)
-    decay: DecayConfig = Field(default_factory=DecayConfig)
-    workers: BackgroundWorkerConfig = Field(default_factory=BackgroundWorkerConfig)
+    llm: LLMConfig = LLMConfig()
+    embedder: EmbedderConfig = EmbedderConfig()
+    llm_relationships: LLMRelationshipConfig = LLMRelationshipConfig()
+    memory_evolution: MemoryEvolutionConfig = MemoryEvolutionConfig()
+    qdrant: QdrantConfig = QdrantConfig()
+    neo4j: Neo4jConfig = Neo4jConfig()
+    sqlite: SQLiteConfig = SQLiteConfig()
+    clustering: ClusteringConfig = ClusteringConfig()
 
-    @classmethod
-    def from_dict(cls, config_dict: dict[str, Any]) -> "Config":
-        """Create config from dictionary."""
-        return cls(**config_dict)
+    # Graph store backend
+    graph_backend: str = "sqlite"  # sqlite, neo4j
 
-    @classmethod
-    def from_env(cls) -> "Config":
-        """Load configuration from environment variables."""
-        return cls(
-            embedding=EmbeddingConfig(
-                provider=os.getenv("MNEMOGRAPH_EMBEDDING_PROVIDER", "ollama"),
-                model=os.getenv("MNEMOGRAPH_EMBEDDING_MODEL", "nomic-embed-text"),
-                host=os.getenv("MNEMOGRAPH_OLLAMA_HOST", "http://localhost:11434"),
-            ),
-            vector_store=VectorStoreConfig(
-                host=os.getenv("MNEMOGRAPH_QDRANT_HOST", "localhost"),
-                port=int(os.getenv("MNEMOGRAPH_QDRANT_PORT", "6333")),
-                collection_name=os.getenv("MNEMOGRAPH_COLLECTION", "memories"),
-            ),
-            graph_store=GraphStoreConfig(
-                backend=os.getenv("MNEMOGRAPH_GRAPH_BACKEND", "sqlite"),
-                db_path=os.getenv("MNEMOGRAPH_SQLITE_PATH", "mnemograph.db"),
-                uri=os.getenv("MNEMOGRAPH_NEO4J_URI", "bolt://localhost:7687"),
-                user=os.getenv("MNEMOGRAPH_NEO4J_USER", "neo4j"),
-                password=os.getenv("MNEMOGRAPH_NEO4J_PASSWORD"),
-            ),
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        """Export config to dictionary."""
-        return self.model_dump()
+    # Debug and logging
+    debug: bool = False
+    log_level: str = "INFO"
 
 
-# Default configuration instance
+# Default config instance
 default_config = Config()

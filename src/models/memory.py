@@ -1,90 +1,101 @@
-"""Memory models with status tracking and temporal metadata."""
+"""
+Memory model with versioning and lifecycle tracking.
+"""
 
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
 from typing import Any
-from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
+
+
+class NodeType(str, Enum):
+    """Types of nodes in the memory graph."""
+
+    MEMORY = "MEMORY"  # User-created memory
+    DERIVED = "DERIVED"  # LLM-synthesized insight
+    TOPIC = "TOPIC"  # Cluster/category
+    ENTITY = "ENTITY"  # Extracted entity
+    DOCUMENT = "DOCUMENT"  # Document node
+    CHUNK = "CHUNK"  # Document chunk
 
 
 class MemoryStatus(str, Enum):
     """Memory lifecycle status."""
 
-    NEW = "new"
-    ACTIVE = "active"
-    EXPIRING_SOON = "expiring_soon"
-    FORGOTTEN = "forgotten"
+    ACTIVE = "active"  # Currently valid and relevant
+    HISTORICAL = "historical"  # Outdated but preserved as history
+    SUPERSEDED = "superseded"  # Replaced by newer version
+    INVALIDATED = "invalidated"  # No longer relevant
 
 
 class Memory(BaseModel):
-    """Individual memory node with metadata and access tracking."""
+    """
+    Memory node with full lifecycle tracking.
 
-    model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()})
+    Features:
+    - Versioning: Track evolution over time
+    - Status management: Active, historical, superseded, invalidated
+    - Temporal tracking: Creation, updates, validity windows
+    - Access patterns: Track usage for intelligent invalidation
+    """
 
-    id: str = Field(default_factory=lambda: str(uuid4()))
-    text: str
-    embedding: list[float] | None = None
+    # Core identity
+    id: str
+    content: str
+    type: NodeType = NodeType.MEMORY
+    embedding: list[float] = Field(default_factory=list)
+
+    # Versioning
+    version: int = 1
+    parent_version: str | None = None  # ID of previous version
+    valid_from: datetime = Field(default_factory=datetime.now)
+    valid_until: datetime | None = None  # None = still valid
+
+    # Status
+    status: MemoryStatus = MemoryStatus.ACTIVE
+    superseded_by: str | None = None  # ID of newer version
+    invalidation_reason: str | None = None
+
+    # Metadata
     metadata: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 1.0
 
-    # Status tracking
-    status: MemoryStatus = MemoryStatus.NEW
-
-    # Temporal metadata
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    last_accessed: datetime | None = None
+    # Access tracking for intelligent invalidation
     access_count: int = 0
-
-    # Decay tracking
-    decay_score: float = 0.0
-
-    def update_access(self) -> None:
-        """Update access metadata."""
-        self.last_accessed = datetime.now(UTC)
-        self.access_count += 1
-        if self.status == MemoryStatus.NEW:
-            self.status = MemoryStatus.ACTIVE
-
-
-class Document(BaseModel):
-    """Document-level node."""
-
-    model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()})
-
-    id: str = Field(default_factory=lambda: str(uuid4()))
-    title: str | None = None
-    text: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-    # References to chunks
-    chunk_ids: list[str] = Field(default_factory=list)
-
-
-class Chunk(BaseModel):
-    """Chunk-level node with parent document reference."""
-
-    model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()})
-
-    id: str = Field(default_factory=lambda: str(uuid4()))
-    text: str
-    embedding: list[float] | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    # Hierarchical reference
-    parent_document_id: str | None = None
-    chunk_index: int = 0
-
-    # Memory tracking
-    status: MemoryStatus = MemoryStatus.NEW
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_accessed: datetime | None = None
-    access_count: int = 0
-    decay_score: float = 0.0
 
-    def update_access(self) -> None:
-        """Update access metadata."""
-        self.last_accessed = datetime.now(UTC)
+    # Timestamps
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+
+    class Config:
+        """Pydantic configuration."""
+
+        json_encoders = {datetime: lambda v: v.isoformat()}
+
+    def mark_accessed(self) -> None:
+        """Mark memory as accessed (for tracking)."""
         self.access_count += 1
-        if self.status == MemoryStatus.NEW:
-            self.status = MemoryStatus.ACTIVE
+        self.last_accessed = datetime.now()
+        self.updated_at = datetime.now()
+
+    def is_valid(self) -> bool:
+        """Check if memory is currently valid."""
+        if self.status != MemoryStatus.ACTIVE:
+            return False
+
+        if self.valid_until is not None and self.valid_until < datetime.now():
+            return False
+
+        return True
+
+    def age_days(self) -> int:
+        """Get age of memory in days."""
+        return (datetime.now() - self.created_at).days
+
+    def days_since_access(self) -> int | None:
+        """Get days since last access."""
+        if self.last_accessed is None:
+            return None
+        return (datetime.now() - self.last_accessed).days

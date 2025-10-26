@@ -1,16 +1,44 @@
-"""Data models for MnemoGraph."""
+"""
+Data models for MnemoGraph.
 
-from .edge import Edge, RelationshipType
-from .memory import Chunk, Document, Memory, MemoryStatus
-from .node import Node, NodeType
+Core models:
+- Memory: Main memory node with versioning
+- NodeType, MemoryStatus: Enums for memory lifecycle
+- VersionChain, MemoryEvolution: Version tracking
+- InvalidationResult: Invalidation check results
+- RelationshipType, Edge: Relationship models
+- RelationshipBundle, ContextBundle: Extraction results
+"""
+
+from src.models.memory import Memory, MemoryStatus, NodeType
+from src.models.relationships import (
+    ContextBundle,
+    DerivedInsight,
+    Edge,
+    RelationshipBundle,
+    RelationshipType,
+)
+from src.models.version import (
+    InvalidationResult,
+    MemoryEvolution,
+    VersionChain,
+    VersionChange,
+)
 
 __all__ = [
+    # Memory models
     "Memory",
-    "MemoryStatus",
-    "Document",
-    "Chunk",
-    "Edge",
-    "RelationshipType",
-    "Node",
     "NodeType",
+    "MemoryStatus",
+    # Version models
+    "MemoryEvolution",
+    "VersionChange",
+    "VersionChain",
+    "InvalidationResult",
+    # Relationship models
+    "RelationshipType",
+    "Edge",
+    "RelationshipBundle",
+    "DerivedInsight",
+    "ContextBundle",
 ]

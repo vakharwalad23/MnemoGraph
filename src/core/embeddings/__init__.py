@@ -1,11 +1,17 @@
-"""Pluggable embedding providers."""
+"""
+Embedder abstraction layer for text embeddings.
 
-from .base import EmbeddingProvider
-from .factory import create_embedding_provider
-from .ollama import OllamaEmbedding
+Supported providers:
+- Ollama (native SDK)
+- OpenAI (official SDK)
+"""
+
+from src.core.embeddings.base import Embedder
+from src.core.embeddings.ollama import OllamaEmbedder
+from src.core.embeddings.openai import OpenAIEmbedder
 
 __all__ = [
-    "EmbeddingProvider",
-    "OllamaEmbedding",
-    "create_embedding_provider",
+    "Embedder",
+    "OllamaEmbedder",
+    "OpenAIEmbedder",
 ]

@@ -15,6 +15,10 @@ dependencies = [
     "ollama",
     "spacy",
     "fastapi[standard]",
+    "openai",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
 ]
 
 [tool.uv]

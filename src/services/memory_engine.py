@@ -1,547 +1,480 @@
 """
-Memory Engine - Main service for MnemoGraph.
+Unified Memory Engine - Integrates all Phase 1-3 components.
 
-This is the primary API that users interact with. It provides high-level
-operations for managing memories with automatic relationship inference.
+Brings together:
+- Phase 1: LLM & Embedder providers
+- Phase 2: Memory Evolution & Invalidation
+- Phase 3: Scalable Relationship Extraction
+- Graph Store & Vector Store
 """
 
-import logging
-import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from src.config import Config
-from src.core.embeddings import EmbeddingProvider
-from src.core.graph_store import GraphStore
-from src.core.vector_store import QdrantStore
-from src.models import NodeType
-from src.services.relationship_orchestrator import RelationshipOrchestrator
-
-logger = logging.getLogger(__name__)
+from src.core.embeddings.base import Embedder
+from src.core.graph_store.base import GraphStore
+from src.core.llm.base import LLMProvider
+from src.core.vector_store.base import VectorStore
+from src.models.memory import Memory, NodeType
+from src.models.relationships import Edge, RelationshipBundle
+from src.models.version import InvalidationResult, MemoryEvolution, VersionChain
+from src.services.invalidation_manager import InvalidationManager
+from src.services.llm_relationship_engine import LLMRelationshipEngine
+from src.services.memory_evolution import MemoryEvolutionService
 
 
 class MemoryEngine:
     """
-    Main memory management engine.
+    Unified Memory Engine integrating all components.
 
-    Provides high-level API for:
-    - Adding memories (with automatic relationship inference)
-    - Querying memories (semantic search)
-    - Updating memories
-    - Deleting memories
-    - Managing conversations and documents
+    Features:
+    - Add memories with automatic relationship extraction
+    - Query memories with intelligent filtering
+    - Memory versioning and evolution
+    - Intelligent invalidation
+    - Vector + Graph search
+    - Background workers
     """
 
     def __init__(
         self,
-        vector_store: QdrantStore,
+        llm: LLMProvider,
+        embedder: Embedder,
         graph_store: GraphStore,
-        embedder: EmbeddingProvider,
+        vector_store: VectorStore,
         config: Config,
     ):
         """
-        Initialize memory engine.
+        Initialize Memory Engine.
 
         Args:
-            vector_store: Vector database for embeddings
-            graph_store: Graph database for relationships
-            embedder: Embedding provider
-            config: System configuration
+            llm: LLM provider for text generation
+            embedder: Embedder for generating embeddings
+            graph_store: Graph database (SQLite or Neo4j)
+            vector_store: Vector database (Qdrant)
+            config: Configuration object
         """
-        self.vector_store = vector_store
-        self.graph_store = graph_store
+        self.llm = llm
         self.embedder = embedder
+        self.graph_store = graph_store
+        self.vector_store = vector_store
         self.config = config
 
-        # Initialize relationship orchestrator
-        self.orchestrator = RelationshipOrchestrator(
-            vector_store=vector_store, graph_store=graph_store, embedder=embedder, config=config
+        # Initialize Phase 2 & 3 services
+        self.evolution = MemoryEvolutionService(
+            llm=llm,
+            graph_store=graph_store,
+            embedder=embedder,
         )
 
-        logger.info("Memory engine initialized")
+        self.invalidation = InvalidationManager(
+            llm=llm,
+            graph_store=graph_store,
+            vector_store=vector_store,
+        )
+
+        self.relationship_engine = LLMRelationshipEngine(
+            llm_provider=llm,
+            embedder=embedder,
+            vector_store=vector_store,
+            graph_store=graph_store,
+            config=config,
+        )
 
     async def initialize(self) -> None:
-        """Initialize all components."""
-        await self.vector_store.initialize()
-        await self.graph_store.initialize()
-        logger.info("Memory engine components initialized")
+        """Initialize all stores."""
+        print("🔧 Initializing Memory Engine...")
 
-    async def close(self) -> None:
-        """Close all connections."""
-        await self.vector_store.close()
-        await self.graph_store.close()
-        logger.info("Memory engine closed")
+        await self.graph_store.initialize()
+        print("   ✓ Graph store initialized")
+
+        await self.vector_store.initialize()
+        print("   ✓ Vector store initialized")
+
+        # Start background invalidation worker if enabled
+        if self.config.llm_relationships.enable_auto_invalidation:
+            self.invalidation.start_background_worker(interval_hours=24)
+            print("   ✓ Background invalidation worker started")
+
+        print("✅ Memory Engine ready!")
+
+    # ═══════════════════════════════════════════════════════════
+    # CORE MEMORY OPERATIONS
+    # ═══════════════════════════════════════════════════════════
 
     async def add_memory(
         self,
-        text: str,
+        content: str,
         metadata: dict[str, Any] | None = None,
-        memory_id: str | None = None,
-        auto_infer_relationships: bool | None = None,
-        context_window_size: int = 50,
-    ) -> dict[str, Any]:
+        memory_type: NodeType = NodeType.MEMORY,
+    ) -> tuple[Memory, RelationshipBundle]:
         """
-        Add a new memory with automatic relationship inference.
+        Add a new memory with automatic relationship extraction.
 
         Args:
-            text: Memory text content
+            content: Memory content
             metadata: Optional metadata
-            memory_id: Optional custom ID (generated if not provided)
-            auto_infer_relationships: Whether to automatically infer relationships
-                (defaults to config.relationships.auto_infer_on_add)
-            context_window_size: Number of recent memories to consider for relationships
+            memory_type: Type of memory node
 
         Returns:
-            Dictionary with memory ID and relationship statistics
+            Tuple of (Memory, RelationshipBundle)
         """
-        # Generate ID if not provided
-        if memory_id is None:
-            memory_id = str(uuid.uuid4())
-
-        # Determine if we should auto-infer
-        if auto_infer_relationships is None:
-            auto_infer_relationships = self.config.relationships.auto_infer_on_add
+        print(f"\n📝 Adding memory: {content[:50]}...")
 
         # Generate embedding
-        logger.info(f"Adding memory: {memory_id}")
-        embedding = await self.embedder.embed(text)
+        print("   🔢 Generating embedding...")
+        embedding = await self.embedder.embed(content)
 
-        # Prepare metadata
-        created_at = datetime.now(UTC)
-        mem_metadata = metadata or {}
-        mem_metadata["text"] = text
-        mem_metadata["created_at"] = created_at.isoformat()
-
-        # Add to vector store
-        await self.vector_store.upsert_memory(
-            memory_id=memory_id, embedding=embedding, metadata=mem_metadata
+        # Create memory object
+        memory = Memory(
+            id=self._generate_id(),
+            content=content,
+            type=memory_type,
+            embedding=embedding,
+            metadata=metadata or {},
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
         )
 
-        # Add to graph store
-        await self.graph_store.add_node(
-            node_id=memory_id, node_type=NodeType.MEMORY, data=mem_metadata
-        )
+        # Process with relationship engine (handles graph + vector store)
+        print("   🔗 Extracting relationships...")
+        extraction = await self.relationship_engine.process_new_memory(memory)
 
-        result = {
-            "memory_id": memory_id,
-            "created_at": created_at.isoformat(),
-            "text": text,
-            "relationships_created": 0,
-            "auto_infer_enabled": auto_infer_relationships,
-        }
+        print(f"✅ Memory added: {memory.id}")
+        print(f"   Relationships: {len(extraction.relationships)}")
+        print(f"   Derived insights: {len(extraction.derived_insights)}")
 
-        # Automatically infer relationships if enabled
-        if auto_infer_relationships:
-            # Get recent similar memories for context using semantic search
-            similar_memories = await self.vector_store.search_similar(
-                query_vector=embedding,
-                limit=context_window_size,
-                score_threshold=None,  # Get all to provide context
-            )
+        return memory, extraction
 
-            # Extract IDs, excluding the current memory
-            context_ids = [mem["id"] for mem in similar_memories if mem["id"] != memory_id][
-                :context_window_size
-            ]
+    async def get_memory(self, memory_id: str, validate: bool = True) -> Memory | None:
+        """
+        Retrieve a memory by ID.
 
-            # Run orchestrator
-            stats = await self.orchestrator.process_new_memory(
-                memory_id=memory_id,
-                text=text,
-                embedding=embedding,
-                created_at=created_at,
-                context_memory_ids=context_ids,
-            )
+        Args:
+            memory_id: Memory identifier
+            validate: Whether to check validity on access
 
-            result["relationships_created"] = stats["relationships_created"]
-            result["engines_run"] = stats["engines_run"]
+        Returns:
+            Memory or None if not found
+        """
+        # Try graph store first (has full data)
+        memory = await self.graph_store.get_node(memory_id)
 
-            logger.info(
-                f"Added memory {memory_id} with " f"{stats['relationships_created']} relationships"
-            )
-        else:
-            logger.info(f"Added memory {memory_id} (no automatic relationships)")
+        if not memory:
+            return None
 
-        return result
+        # Validate on access if enabled
+        if validate and self.config.llm_relationships.enable_auto_invalidation:
+            memory = await self.invalidation.validate_on_access(memory)
 
-    async def query_memories(
+        return memory
+
+    async def update_memory(
+        self, memory_id: str, new_content: str
+    ) -> tuple[Memory, MemoryEvolution]:
+        """
+        Update memory with versioning.
+
+        Args:
+            memory_id: Memory to update
+            new_content: New content
+
+        Returns:
+            Tuple of (updated_memory, evolution_result)
+        """
+        print(f"\n🔄 Updating memory: {memory_id}")
+
+        # Get current memory
+        current = await self.graph_store.get_node(memory_id)
+        if not current:
+            raise ValueError(f"Memory not found: {memory_id}")
+
+        # Evolve memory (Phase 2)
+        evolution = await self.evolution.evolve_memory(current, new_content)
+
+        # If new version created, process relationships
+        if evolution.new_version:
+            new_memory = await self.graph_store.get_node(evolution.new_version)
+
+            # Generate new embedding
+            new_memory.embedding = await self.embedder.embed(new_content)
+
+            # Update vector store
+            await self.vector_store.upsert_memory(new_memory)
+
+            print(f"✅ Memory updated with new version: {evolution.new_version}")
+
+            return new_memory, evolution
+
+        print(f"✅ Memory augmented: {memory_id}")
+        return current, evolution
+
+    async def delete_memory(self, memory_id: str) -> None:
+        """
+        Delete a memory from both stores.
+
+        Args:
+            memory_id: Memory to delete
+        """
+        print(f"🗑️  Deleting memory: {memory_id}")
+
+        await self.graph_store.delete_node(memory_id)
+        await self.vector_store.delete_memory(memory_id)
+
+        print(f"✅ Memory deleted: {memory_id}")
+
+    # ═══════════════════════════════════════════════════════════
+    # SEARCH & QUERY OPERATIONS
+    # ═══════════════════════════════════════════════════════════
+
+    async def search_similar(
         self,
         query: str,
         limit: int = 10,
-        similarity_threshold: float | None = None,
         filters: dict[str, Any] | None = None,
-        include_relationships: bool = False,
-    ) -> list[dict[str, Any]]:
+        score_threshold: float | None = None,
+    ) -> list[tuple[Memory, float]]:
         """
-        Query memories using semantic search.
+        Search for similar memories by semantic meaning.
 
         Args:
-            query: Search query text
-            limit: Maximum number of results
-            similarity_threshold: Minimum similarity score
-            filters: Optional metadata filters
-            include_relationships: Whether to include relationship info
+            query: Query text
+            limit: Maximum results
+            filters: Optional filters (status, type, etc.)
+            score_threshold: Minimum similarity score
 
         Returns:
-            List of matching memories with scores
+            List of (Memory, score) tuples
         """
-        logger.info(f"Querying memories: '{query}' (limit={limit})")
-
         # Generate query embedding
         query_embedding = await self.embedder.embed(query)
 
         # Search vector store
         results = await self.vector_store.search_similar(
-            query_vector=query_embedding,
+            vector=query_embedding,
             limit=limit,
-            score_threshold=similarity_threshold,
-            filter_dict=filters,
+            filters=filters,
+            score_threshold=score_threshold,
         )
 
-        # Optionally enrich with relationship data
-        if include_relationships:
-            for result in results:
-                mem_id = result["id"]
-                neighbors = await self.graph_store.get_neighbors(mem_id)
-                result["relationships"] = {
-                    "count": len(neighbors),
-                    "types": list({n.get("edge_type") for n in neighbors}),
-                }
+        return [(result.memory, result.score) for result in results]
 
-        logger.info(f"Found {len(results)} matching memories")
-        return results
-
-    async def get_memory(
-        self, memory_id: str, include_relationships: bool = False
-    ) -> dict[str, Any] | None:
+    async def query_memories(
+        self,
+        filters: dict[str, Any] | None = None,
+        order_by: str | None = None,
+        limit: int = 100,
+    ) -> list[Memory]:
         """
-        Get a specific memory by ID.
+        Query memories from graph store with filters.
 
         Args:
-            memory_id: Memory identifier
-            include_relationships: Whether to include relationship info
+            filters: Filter conditions
+            order_by: Sort order
+            limit: Maximum results
 
         Returns:
-            Memory data or None if not found
+            List of memories
         """
-        # Get from vector store
-        mem_data = await self.vector_store.get_memory(memory_id)
+        return await self.graph_store.query_memories(
+            filters=filters,
+            order_by=order_by,
+            limit=limit,
+        )
 
-        if not mem_data:
-            return None
-
-        # Get from graph store for full properties
-        node = await self.graph_store.get_node(memory_id)
-
-        if node:
-            mem_data["properties"] = node.data
-
-        # Optionally include relationships
-        if include_relationships:
-            neighbors = await self.graph_store.get_neighbors(memory_id)
-            mem_data["relationships"] = {
-                "count": len(neighbors),
-                "neighbors": [
-                    {"id": n["node"].id, "type": n.get("edge_type"), "weight": n.get("edge_weight")}
-                    for n in neighbors
-                ],
-            }
-
-        return mem_data
-
-    async def update_memory(
+    async def get_neighbors(
         self,
         memory_id: str,
-        text: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        reindex_relationships: bool = True,
-    ) -> dict[str, Any]:
+        relationship_types: list[str] | None = None,
+        direction: str = "outgoing",
+        depth: int = 1,
+        limit: int = 100,
+    ) -> list[tuple[Memory, Edge]]:
         """
-        Update an existing memory.
+        Get related memories via graph relationships.
 
         Args:
-            memory_id: Memory identifier
-            text: New text content (if changing)
-            metadata: New/updated metadata
-            reindex_relationships: Whether to re-infer relationships
+            memory_id: Starting memory
+            relationship_types: Filter by types
+            direction: "outgoing", "incoming", or "both"
+            depth: Traversal depth
+            limit: Maximum results
 
         Returns:
-            Update statistics
+            List of tuples with (Memory, Edge)
         """
-        logger.info(f"Updating memory: {memory_id}")
+        return await self.graph_store.get_neighbors(
+            node_id=memory_id,
+            relationship_types=relationship_types,
+            direction=direction,
+            depth=depth,
+            limit=limit,
+        )
 
-        # Get existing memory
-        existing = await self.vector_store.get_memory(memory_id)
-        if not existing:
-            raise ValueError(f"Memory {memory_id} not found")
-
-        # Update text and embedding if provided
-        if text is not None:
-            embedding = await self.embedder.embed(text)
-            updated_metadata = existing.get("metadata", {})
-            updated_metadata["text"] = text
-            updated_metadata["updated_at"] = datetime.now(UTC).isoformat()
-
-            if metadata:
-                updated_metadata.update(metadata)
-
-            # Update vector store
-            await self.vector_store.upsert_memory(
-                memory_id=memory_id, embedding=embedding, metadata=updated_metadata
-            )
-
-            # Update graph store
-            await self.graph_store.add_node(
-                node_id=memory_id, node_type=NodeType.MEMORY, data=updated_metadata
-            )
-        elif metadata:
-            # Update only metadata
-            existing_metadata = existing.get("metadata", {})
-            existing_metadata.update(metadata)
-            existing_metadata["updated_at"] = datetime.now(UTC).isoformat()
-
-            await self.graph_store.add_node(
-                node_id=memory_id, node_type=NodeType.MEMORY, data=existing_metadata
-            )
-
-        result = {
-            "memory_id": memory_id,
-            "updated": True,
-            "text_changed": text is not None,
-            "relationships_reindexed": False,
-        }
-
-        # Optionally reindex relationships
-        if reindex_relationships and text is not None:
-            # Delete old edges (except structural ones like PARENT_OF)
-            # Then re-run orchestrator
-            # TODO: Implement selective edge deletion
-            logger.info(f"Relationship reindexing for {memory_id} (not yet implemented)")
-
-        logger.info(f"Updated memory {memory_id}")
-        return result
-
-    async def delete_memory(
-        self, memory_id: str, delete_relationships: bool = True
-    ) -> dict[str, Any]:
+    async def find_path(self, start_id: str, end_id: str, max_depth: int = 5) -> list[str] | None:
         """
-        Delete a memory.
+        Find path between two memories.
 
         Args:
-            memory_id: Memory identifier
-            delete_relationships: Whether to delete associated relationships
+            start_id: Start memory ID
+            end_id: End memory ID
+            max_depth: Maximum path length
 
         Returns:
-            Deletion statistics
+            List of memory IDs forming path, or None
         """
-        logger.info(f"Deleting memory: {memory_id}")
+        return await self.graph_store.find_path(start_id, end_id, max_depth)
 
-        # Get relationship count before deletion
-        neighbors = await self.graph_store.get_neighbors(memory_id)
-        relationship_count = len(neighbors)
+    # ═══════════════════════════════════════════════════════════
+    # VERSIONING & HISTORY OPERATIONS
+    # ═══════════════════════════════════════════════════════════
 
-        # Delete from vector store
-        await self.vector_store.delete_memory(memory_id)
+    async def get_version_history(self, memory_id: str) -> VersionChain:
+        """
+        Get complete version history for a memory.
 
-        # Delete from graph store
-        if delete_relationships:
-            await self.graph_store.delete_node(memory_id)
-        else:
-            # Just remove the node, keep orphaned edges
-            # (graph store should handle this automatically)
-            await self.graph_store.delete_node(memory_id)
+        Args:
+            memory_id: Memory ID
 
-        logger.info(f"Deleted memory {memory_id} " f"(removed {relationship_count} relationships)")
+        Returns:
+            VersionChain object
+        """
+        return await self.evolution.get_version_history(memory_id)
+
+    async def rollback_to_version(self, version_id: str) -> Memory:
+        """
+        Rollback to a previous version.
+
+        Args:
+            version_id: Version to rollback to
+
+        Returns:
+            New memory with rolled back content
+        """
+        return await self.evolution.rollback_to_version(version_id)
+
+    async def time_travel_query(self, query: str, as_of: datetime, limit: int = 10) -> list[Memory]:
+        """
+        Query memories as they existed at a point in time.
+
+        Args:
+            query: Query text
+            as_of: Point in time
+            limit: Maximum results
+
+        Returns:
+            List of memories valid at that time
+        """
+        query_embedding = await self.embedder.embed(query)
+
+        return await self.evolution.time_travel_query(query_embedding, as_of, limit)
+
+    # ═══════════════════════════════════════════════════════════
+    # INVALIDATION OPERATIONS
+    # ═══════════════════════════════════════════════════════════
+
+    async def check_memory_validity(self, memory_id: str) -> InvalidationResult:
+        """
+        Check if a memory is still valid.
+
+        Args:
+            memory_id: Memory to check
+
+        Returns:
+            InvalidationResult
+        """
+        memory = await self.graph_store.get_node(memory_id)
+        if not memory:
+            raise ValueError(f"Memory not found: {memory_id}")
+
+        return await self.invalidation.check_invalidation(memory)
+
+    async def invalidate_memory(self, memory_id: str, reason: str) -> None:
+        """
+        Manually invalidate a memory.
+
+        Args:
+            memory_id: Memory to invalidate
+            reason: Invalidation reason
+        """
+        memory = await self.graph_store.get_node(memory_id)
+        if not memory:
+            raise ValueError(f"Memory not found: {memory_id}")
+
+        from src.models.version import InvalidationResult
+
+        result = InvalidationResult(
+            memory_id=memory_id,
+            status="invalidated",
+            reasoning=reason,
+            confidence=1.0,
+        )
+
+        await self.invalidation._mark_invalidated(memory, result)
+
+    # ═══════════════════════════════════════════════════════════
+    # STATISTICS & MONITORING
+    # ═══════════════════════════════════════════════════════════
+
+    async def get_statistics(self) -> dict[str, Any]:
+        """
+        Get memory engine statistics.
+
+        Returns:
+            Statistics dictionary
+        """
+        # Count nodes by status
+        active_count = await self.graph_store.count_nodes({"status": "active"})
+        historical_count = await self.graph_store.count_nodes({"status": "historical"})
+        superseded_count = await self.graph_store.count_nodes({"status": "superseded"})
+
+        # Count edges
+        total_edges = await self.graph_store.count_edges()
+
+        # Count vector store memories
+        vector_count = await self.vector_store.count_memories()
 
         return {
-            "memory_id": memory_id,
-            "deleted": True,
-            "relationships_removed": relationship_count,
+            "memories": {
+                "active": active_count,
+                "historical": historical_count,
+                "superseded": superseded_count,
+                "total_graph": active_count + historical_count + superseded_count,
+                "total_vector": vector_count,
+            },
+            "relationships": {
+                "total": total_edges,
+            },
         }
 
-    async def add_conversation(
-        self,
-        messages: list[dict[str, str]],
-        conversation_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Add a conversation as a sequence of messages.
+    # ═══════════════════════════════════════════════════════════
+    # LIFECYCLE MANAGEMENT
+    # ═══════════════════════════════════════════════════════════
 
-        Args:
-            messages: List of message dicts with 'text' and optional 'role'
-            conversation_id: Optional conversation identifier
-            metadata: Optional conversation-level metadata
+    async def close(self) -> None:
+        """Close all connections and stop workers."""
+        print("🛑 Shutting down Memory Engine...")
 
-        Returns:
-            Conversation creation statistics
-        """
-        if conversation_id is None:
-            conversation_id = str(uuid.uuid4())
+        # Stop background workers
+        self.invalidation.stop_background_worker()
 
-        logger.info(f"Adding conversation {conversation_id} with {len(messages)} messages")
+        # Close stores
+        await self.graph_store.close()
+        await self.vector_store.close()
 
-        message_ids = []
+        # Close providers
+        await self.llm.close()
+        await self.embedder.close()
 
-        # Add each message as a memory
-        for i, msg in enumerate(messages):
-            msg_id = f"{conversation_id}-msg-{i}"
-            msg_metadata = {
-                "conversation_id": conversation_id,
-                "message_index": i,
-                "role": msg.get("role", "user"),
-            }
-            if metadata:
-                msg_metadata.update(metadata)
+        print("✅ Memory Engine shutdown complete")
 
-            await self.add_memory(
-                text=msg["text"],
-                metadata=msg_metadata,
-                memory_id=msg_id,
-                auto_infer_relationships=False,  # We'll create thread manually
-            )
-            message_ids.append(msg_id)
+    # ═══════════════════════════════════════════════════════════
+    # HELPER METHODS
+    # ═══════════════════════════════════════════════════════════
 
-        # Create conversation thread
-        thread_result = await self.orchestrator.create_conversation_thread(
-            memory_ids=message_ids, thread_metadata={"conversation_id": conversation_id}
-        )
+    def _generate_id(self) -> str:
+        """Generate unique memory ID."""
+        from uuid import uuid4
 
-        logger.info(
-            f"Created conversation {conversation_id} with "
-            f"{len(message_ids)} messages and {thread_result['edges_created']} edges"
-        )
-
-        return {
-            "conversation_id": conversation_id,
-            "message_count": len(message_ids),
-            "message_ids": message_ids,
-            "edges_created": thread_result["edges_created"],
-        }
-
-    async def add_document(
-        self,
-        text: str,
-        chunk_size: int = 500,
-        chunk_overlap: int = 50,
-        document_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Add a document by chunking it into memories.
-
-        Args:
-            text: Full document text
-            chunk_size: Size of each chunk in characters
-            chunk_overlap: Overlap between chunks
-            document_id: Optional document identifier
-            metadata: Optional document-level metadata
-
-        Returns:
-            Document creation statistics
-        """
-        if document_id is None:
-            document_id = str(uuid.uuid4())
-
-        logger.info(f"Adding document {document_id}")
-
-        # Create document node
-        doc_metadata = metadata or {}
-        doc_metadata["type"] = "document"
-        doc_metadata["created_at"] = datetime.now(UTC).isoformat()
-
-        await self.graph_store.add_node(
-            node_id=document_id, node_type=NodeType.DOCUMENT, data=doc_metadata
-        )
-
-        # Chunk the document
-        chunks = self._chunk_text(text, chunk_size, chunk_overlap)
-        chunk_ids = []
-
-        # Add each chunk as a memory
-        for i, chunk_text in enumerate(chunks):
-            chunk_id = f"{document_id}-chunk-{i}"
-            chunk_metadata = {
-                "document_id": document_id,
-                "chunk_index": i,
-                "total_chunks": len(chunks),
-            }
-            if metadata:
-                chunk_metadata.update(metadata)
-
-            # Add chunk as memory
-            embedding = await self.embedder.embed(chunk_text)
-            await self.vector_store.upsert_memory(
-                memory_id=chunk_id, embedding=embedding, metadata=chunk_metadata
-            )
-
-            await self.graph_store.add_node(
-                node_id=chunk_id, node_type=NodeType.CHUNK, data=chunk_metadata
-            )
-
-            chunk_ids.append(chunk_id)
-
-        # Create document hierarchy
-        hierarchy_result = await self.orchestrator.create_document_hierarchy(
-            document_id=document_id, chunk_ids=chunk_ids
-        )
-
-        # Infer relationships between chunks
-        if self.config.relationships.auto_infer_on_add:
-            batch_result = await self.orchestrator.batch_process_memories(
-                memory_ids=chunk_ids, batch_size=20
-            )
-            total_relationships = (
-                hierarchy_result["edges_created"] + batch_result["total_relationships"]
-            )
-        else:
-            total_relationships = hierarchy_result["edges_created"]
-
-        logger.info(
-            f"Created document {document_id} with {len(chunks)} chunks "
-            f"and {total_relationships} relationships"
-        )
-
-        return {
-            "document_id": document_id,
-            "chunk_count": len(chunks),
-            "chunk_ids": chunk_ids,
-            "relationships_created": total_relationships,
-        }
-
-    def _chunk_text(self, text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> list[str]:
-        """
-        Split text into overlapping chunks.
-
-        Args:
-            text: Text to chunk
-            chunk_size: Size of each chunk
-            chunk_overlap: Overlap between chunks
-
-        Returns:
-            List of text chunks
-        """
-        chunks = []
-        start = 0
-        text_length = len(text)
-
-        while start < text_length:
-            end = start + chunk_size
-            chunk = text[start:end]
-
-            # Try to break at sentence boundary
-            if end < text_length:
-                # Look for sentence endings
-                last_period = chunk.rfind(". ")
-                last_question = chunk.rfind("? ")
-                last_exclaim = chunk.rfind("! ")
-
-                boundary = max(last_period, last_question, last_exclaim)
-                if boundary > chunk_size * 0.5:  # At least 50% of chunk
-                    chunk = chunk[: boundary + 2]
-                    end = start + boundary + 2
-
-            chunks.append(chunk.strip())
-            start = end - chunk_overlap
-
-        return chunks
+        return f"mem_{uuid4().hex[:12]}"

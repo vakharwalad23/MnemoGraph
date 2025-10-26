@@ -1,22 +1,45 @@
-"""Qdrant vector store implementation."""
+"""
+Qdrant vector store implementation - redesigned for Phase 1-3.
 
-from datetime import UTC, datetime
+Clean implementation that works with new Memory model and optimized for performance.
+"""
+
+from datetime import datetime
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_DNS, UUID, uuid5
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
+    DatetimeRange,
     Distance,
     FieldCondition,
     Filter,
+    HnswConfigDiff,
+    MatchAny,
     MatchValue,
+    OptimizersConfigDiff,
     PointStruct,
+    ScalarQuantization,
+    ScalarQuantizationConfig,
+    ScalarType,
     VectorParams,
 )
 
+from src.core.vector_store.base import SearchResult, VectorStore
+from src.models.memory import Memory, MemoryStatus, NodeType
 
-class QdrantStore:
-    """Async Qdrant vector store for memory embeddings."""
+
+class QdrantStore(VectorStore):
+    """
+    Optimized Qdrant vector store for memory embeddings.
+
+    Features:
+    - gRPC connection for 2-3x speed
+    - HNSW indexing for fast search
+    - Int8 quantization for memory efficiency
+    - Batch operations
+    - Payload indexing for fast filtering
+    """
 
     def __init__(
         self,
@@ -24,155 +47,375 @@ class QdrantStore:
         port: int = 6333,
         collection_name: str = "memories",
         vector_size: int = 768,
+        use_grpc: bool = False,  # Set to True for production
+        use_quantization: bool = False,  # Set to True for large datasets
     ):
         """
         Initialize Qdrant store.
 
         Args:
             host: Qdrant host
-            port: Qdrant port
-            collection_name: Name of the collection to use
-            vector_size: Dimension of embedding vectors
+            port: Qdrant port (6333 for HTTP, 6334 for gRPC)
+            collection_name: Collection name
+            vector_size: Embedding dimension
+            use_grpc: Use gRPC connection (faster)
+            use_quantization: Use int8 quantization (memory efficient)
         """
         self.host = host
         self.port = port
         self.collection_name = collection_name
         self.vector_size = vector_size
+        self.use_grpc = use_grpc
+        self.use_quantization = use_quantization
         self.client: AsyncQdrantClient | None = None
 
     def _to_uuid(self, id_str: str) -> str:
         """
-        Convert string ID to UUID format.
+        Convert string ID to UUID format consistently.
 
         Args:
-            id_str: String identifier (can be UUID or regular string)
+            id_str: String identifier
 
         Returns:
             UUID string
         """
         try:
-            # If it's already a valid UUID, return it
             UUID(id_str)
             return id_str
         except ValueError:
-            # If not, create a UUID from the string
-            # Use UUID5 with a namespace for consistent conversion
-            from uuid import NAMESPACE_DNS, uuid5
-
             return str(uuid5(NAMESPACE_DNS, id_str))
 
     async def connect(self) -> None:
         """Establish connection to Qdrant."""
         if self.client is None:
-            self.client = AsyncQdrantClient(host=self.host, port=self.port)
+            self.client = AsyncQdrantClient(
+                host=self.host,
+                port=self.port,
+                prefer_grpc=self.use_grpc,
+                timeout=30,
+            )
 
     async def initialize(self) -> None:
-        """Initialize the collection if it doesn't exist."""
+        """Initialize the collection with optimized settings."""
         await self.connect()
 
         collections = await self.client.get_collections()
         collection_names = [col.name for col in collections.collections]
 
         if self.collection_name not in collection_names:
-            await self.client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
+            # Create with optimized settings
+            vectors_config = VectorParams(
+                size=self.vector_size,
+                distance=Distance.COSINE,
+                # HNSW indexing for fast search
+                hnsw_config=HnswConfigDiff(
+                    m=16,  # 16-32 recommended
+                    ef_construct=100,  # Higher = better quality
+                    full_scan_threshold=10000,
+                ),
             )
 
-    async def upsert_memory(
-        self, memory_id: str, embedding: list[float], metadata: dict[str, Any] | None = None
-    ) -> None:
+            # Add quantization if enabled
+            if self.use_quantization:
+                vectors_config.quantization_config = ScalarQuantization(
+                    scalar=ScalarQuantizationConfig(
+                        type=ScalarType.INT8,
+                        quantile=0.99,
+                        always_ram=True,
+                    )
+                )
+
+            await self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=vectors_config,
+                optimizers_config=OptimizersConfigDiff(
+                    indexing_threshold=20000,
+                    memmap_threshold=50000,
+                ),
+            )
+
+            # Create payload indices for fast filtering
+            await self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="status",
+                field_schema="keyword",
+            )
+
+            await self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="type",
+                field_schema="keyword",
+            )
+
+            await self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="created_at",
+                field_schema="datetime",
+            )
+
+    def _memory_to_payload(self, memory: Memory) -> dict[str, Any]:
         """
-        Store or update a memory vector.
+        Convert Memory to Qdrant payload.
 
         Args:
-            memory_id: Unique memory identifier
-            embedding: Embedding vector
-            metadata: Additional metadata to store
+            memory: Memory object
+
+        Returns:
+            Payload dictionary
+        """
+        return {
+            "original_id": memory.id,
+            "content": memory.content,
+            "type": memory.type.value,
+            "status": memory.status.value,
+            "version": memory.version,
+            "parent_version": memory.parent_version,
+            "valid_from": memory.valid_from.isoformat(),
+            "valid_until": memory.valid_until.isoformat() if memory.valid_until else None,
+            "superseded_by": memory.superseded_by,
+            "invalidation_reason": memory.invalidation_reason,
+            "confidence": memory.confidence,
+            "access_count": memory.access_count,
+            "last_accessed": memory.last_accessed.isoformat() if memory.last_accessed else None,
+            "created_at": memory.created_at.isoformat(),
+            "updated_at": memory.updated_at.isoformat(),
+            "metadata": memory.metadata,
+        }
+
+    def _payload_to_memory(self, payload: dict[str, Any], vector: list[float]) -> Memory:
+        """
+        Convert Qdrant payload to Memory.
+
+        Args:
+            payload: Qdrant payload
+            vector: Embedding vector
+
+        Returns:
+            Memory object
+        """
+        return Memory(
+            id=payload["original_id"],
+            content=payload["content"],
+            type=NodeType(payload["type"]),
+            embedding=vector,
+            version=payload.get("version", 1),
+            parent_version=payload.get("parent_version"),
+            valid_from=datetime.fromisoformat(payload["valid_from"]),
+            valid_until=(
+                datetime.fromisoformat(payload["valid_until"])
+                if payload.get("valid_until")
+                else None
+            ),
+            status=MemoryStatus(payload["status"]),
+            superseded_by=payload.get("superseded_by"),
+            invalidation_reason=payload.get("invalidation_reason"),
+            metadata=payload.get("metadata", {}),
+            confidence=payload.get("confidence", 1.0),
+            access_count=payload.get("access_count", 0),
+            last_accessed=(
+                datetime.fromisoformat(payload["last_accessed"])
+                if payload.get("last_accessed")
+                else None
+            ),
+            created_at=datetime.fromisoformat(payload["created_at"]),
+            updated_at=datetime.fromisoformat(payload["updated_at"]),
+        )
+
+    async def upsert_memory(self, memory: Memory) -> None:
+        """
+        Store or update a memory with its embedding.
+
+        Args:
+            memory: Memory object with embedding
         """
         await self.connect()
 
-        payload = metadata or {}
-        payload["updated_at"] = datetime.now(UTC).isoformat()
-        payload["original_id"] = memory_id  # Store original ID in payload
+        uuid_id = self._to_uuid(memory.id)
+        payload = self._memory_to_payload(memory)
 
-        # Convert to UUID for Qdrant
-        uuid_id = self._to_uuid(memory_id)
+        point = PointStruct(
+            id=uuid_id,
+            vector=memory.embedding,
+            payload=payload,
+        )
 
-        point = PointStruct(id=uuid_id, vector=embedding, payload=payload)
+        await self.client.upsert(
+            collection_name=self.collection_name,
+            points=[point],
+            wait=False,  # Don't wait for indexing
+        )
 
-        await self.client.upsert(collection_name=self.collection_name, points=[point])
+    async def batch_upsert(self, memories: list[Memory], batch_size: int = 100) -> None:
+        """
+        Batch upsert multiple memories for efficiency.
+
+        Args:
+            memories: List of Memory objects
+            batch_size: Batch size for upload
+        """
+        await self.connect()
+
+        for i in range(0, len(memories), batch_size):
+            batch = memories[i : i + batch_size]
+
+            points = [
+                PointStruct(
+                    id=self._to_uuid(mem.id),
+                    vector=mem.embedding,
+                    payload=self._memory_to_payload(mem),
+                )
+                for mem in batch
+            ]
+
+            await self.client.upsert(
+                collection_name=self.collection_name,
+                points=points,
+                wait=False,
+            )
 
     async def search_similar(
         self,
-        query_vector: list[float],
+        vector: list[float],
         limit: int = 10,
+        filters: dict[str, Any] | None = None,
         score_threshold: float | None = None,
-        filter_dict: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[SearchResult]:
         """
-        Search for similar memories.
+        Search for similar memories by vector.
 
         Args:
-            query_vector: Query embedding vector
-            limit: Maximum number of results
+            vector: Query embedding vector
+            limit: Maximum results
+            filters: Optional payload filters
             score_threshold: Minimum similarity score
-            filter_dict: Optional metadata filters
 
         Returns:
-            List of similar memories with scores
+            List of search results
         """
         await self.connect()
 
+        # Build filter
         query_filter = None
-        if filter_dict:
-            # Simple filter implementation
+        if filters:
             conditions = []
-            for key, value in filter_dict.items():
-                conditions.append(FieldCondition(key=key, match=MatchValue(value=value)))
+
+            # Status filter
+            if "status" in filters:
+                status_values = (
+                    filters["status"]
+                    if isinstance(filters["status"], list)
+                    else [filters["status"]]
+                )
+                conditions.append(
+                    FieldCondition(
+                        key="status",
+                        match=MatchAny(any=status_values),
+                    )
+                )
+
+            # Type filter
+            if "type" in filters:
+                type_values = (
+                    filters["type"] if isinstance(filters["type"], list) else [filters["type"]]
+                )
+                conditions.append(
+                    FieldCondition(
+                        key="type",
+                        match=MatchAny(any=type_values),
+                    )
+                )
+
+            # Date range filter
+            if "created_after" in filters:
+                conditions.append(
+                    FieldCondition(
+                        key="created_at",
+                        range=DatetimeRange(gte=filters["created_after"]),
+                    )
+                )
+
             if conditions:
                 query_filter = Filter(must=conditions)
 
+        # Search
         response = await self.client.query_points(
             collection_name=self.collection_name,
-            query=query_vector,
+            query=vector,
             limit=limit,
             score_threshold=score_threshold,
             query_filter=query_filter,
             with_payload=True,
+            with_vectors=True,
         )
 
-        return [
-            {
-                "id": point.payload.get("original_id", str(point.id)),  # Return original ID
-                "score": point.score,
-                "metadata": point.payload,
-            }
-            for point in response.points
-        ]
+        # Convert to SearchResults
+        results = []
+        for point in response.points:
+            memory = self._payload_to_memory(point.payload, point.vector)
+            results.append(
+                SearchResult(
+                    memory=memory,
+                    score=point.score,
+                    metadata={"qdrant_id": str(point.id)},
+                )
+            )
 
-    async def update_access_metadata(
-        self, memory_id: str, access_count: int, last_accessed: datetime
-    ) -> None:
+        return results
+
+    async def search_by_payload(
+        self, filter: dict[str, Any], limit: int = 10
+    ) -> list[SearchResult]:
         """
-        Update access tracking metadata.
+        Search by payload/metadata filters.
 
         Args:
-            memory_id: Memory identifier
-            access_count: Updated access count
-            last_accessed: Last access timestamp
+            filter: Payload filter conditions
+            limit: Maximum results
+
+        Returns:
+            List of matching memories
         """
         await self.connect()
 
-        uuid_id = self._to_uuid(memory_id)
+        # Build filter conditions
+        conditions = []
+        for key, value in filter.items():
+            if "$contains" in str(value):
+                # Handle contains operations
+                continue
+            conditions.append(
+                FieldCondition(
+                    key=key,
+                    match=MatchValue(value=value),
+                )
+            )
 
-        await self.client.set_payload(
+        query_filter = Filter(must=conditions) if conditions else None
+
+        # Scroll through results (no vector search)
+        response = await self.client.scroll(
             collection_name=self.collection_name,
-            payload={"access_count": access_count, "last_accessed": last_accessed.isoformat()},
-            points=[uuid_id],
+            scroll_filter=query_filter,
+            limit=limit,
+            with_payload=True,
+            with_vectors=True,
         )
 
-    async def get_memory(self, memory_id: str) -> dict[str, Any] | None:
+        # Convert to SearchResults
+        results = []
+        for point in response[0]:  # response is tuple (points, next_offset)
+            memory = self._payload_to_memory(point.payload, point.vector)
+            results.append(
+                SearchResult(
+                    memory=memory,
+                    score=1.0,  # No score for payload search
+                    metadata={"qdrant_id": str(point.id)},
+                )
+            )
+
+        return results
+
+    async def get_memory(self, memory_id: str) -> Memory | None:
         """
         Retrieve a memory by ID.
 
@@ -180,25 +423,23 @@ class QdrantStore:
             memory_id: Memory identifier
 
         Returns:
-            Memory data or None if not found
+            Memory or None if not found
         """
         await self.connect()
 
         uuid_id = self._to_uuid(memory_id)
 
         results = await self.client.retrieve(
-            collection_name=self.collection_name, ids=[uuid_id], with_vectors=True
+            collection_name=self.collection_name,
+            ids=[uuid_id],
+            with_vectors=True,
         )
 
         if not results:
             return None
 
         point = results[0]
-        return {
-            "id": point.payload.get("original_id", memory_id),  # Return original ID
-            "vector": point.vector,
-            "metadata": point.payload,
-        }
+        return self._payload_to_memory(point.payload, point.vector)
 
     async def delete_memory(self, memory_id: str) -> None:
         """
@@ -211,19 +452,46 @@ class QdrantStore:
 
         uuid_id = self._to_uuid(memory_id)
 
-        await self.client.delete(collection_name=self.collection_name, points_selector=[uuid_id])
+        await self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=[uuid_id],
+        )
 
-    async def count_memories(self) -> int:
+    async def count_memories(self, filters: dict[str, Any] | None = None) -> int:
         """
-        Get the total number of memories in the collection.
+        Count memories matching filters.
+
+        Args:
+            filters: Optional filter conditions
 
         Returns:
             Number of memories
         """
         await self.connect()
 
-        collection_info = await self.client.get_collection(self.collection_name)
-        return collection_info.points_count
+        if not filters:
+            collection_info = await self.client.get_collection(self.collection_name)
+            return collection_info.points_count
+
+        # Count with filters
+        query_filter = None
+        if filters:
+            conditions = []
+            for key, value in filters.items():
+                conditions.append(
+                    FieldCondition(
+                        key=key,
+                        match=MatchValue(value=value),
+                    )
+                )
+            query_filter = Filter(must=conditions)
+
+        response = await self.client.count(
+            collection_name=self.collection_name,
+            count_filter=query_filter,
+        )
+
+        return response.count
 
     async def close(self) -> None:
         """Close the connection to Qdrant."""

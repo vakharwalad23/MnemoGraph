@@ -1,275 +1,486 @@
-"""Neo4j-based graph store implementation."""
+"""
+Neo4j graph store implementation - redesigned for Phase 2 & 3.
 
-from datetime import UTC, datetime
+Production-grade graph database for complex relationship queries and graph analytics.
+"""
+
+import json
+from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
-from src.models import MemoryStatus, Node, NodeType, RelationshipType
-
-from .base import GraphStore
+from src.core.graph_store.base import GraphStore
+from src.models.memory import Memory, MemoryStatus, NodeType
+from src.models.relationships import Edge, RelationshipType
 
 
 class Neo4jGraphStore(GraphStore):
-    """Neo4j-based graph storage."""
+    """
+    Neo4j-based graph store for memories and relationships.
+
+    Features:
+    - Production-grade graph database
+    - Native graph traversal
+    - Cypher query language
+    - ACID transactions
+    - Distributed graph analytics
+    - Fast path finding
+    """
 
     def __init__(
         self,
         uri: str = "bolt://localhost:7687",
-        user: str = "neo4j",
-        password: str = "mnemograph123",
+        username: str = "neo4j",
+        password: str = "password",
+        database: str = "neo4j",
     ):
         """
         Initialize Neo4j graph store.
 
         Args:
             uri: Neo4j connection URI
-            user: Username
+            username: Username
             password: Password
+            database: Database name
         """
         self.uri = uri
-        self.user = user
+        self.username = username
         self.password = password
+        self.database = database
         self.driver: AsyncDriver | None = None
 
-    async def _get_driver(self) -> AsyncDriver:
-        """Get or create Neo4j driver."""
+    async def connect(self) -> None:
+        """Establish connection to Neo4j."""
         if self.driver is None:
-            self.driver = AsyncGraphDatabase.driver(self.uri, auth=(self.user, self.password))
-        return self.driver
+            self.driver = AsyncGraphDatabase.driver(
+                self.uri,
+                auth=(self.username, self.password),
+            )
 
     async def initialize(self) -> None:
         """Create indexes and constraints."""
-        driver = await self._get_driver()
+        await self.connect()
 
-        async with driver.session() as session:
-            # Create constraints and indexes
+        async with self.driver.session(database=self.database) as session:
+            # Create constraint on Memory ID (unique)
             await session.run(
-                "CREATE CONSTRAINT node_id IF NOT EXISTS FOR (n:Node) REQUIRE n.id IS UNIQUE"
+                "CREATE CONSTRAINT memory_id IF NOT EXISTS " "FOR (m:Memory) REQUIRE m.id IS UNIQUE"
             )
-            await session.run("CREATE INDEX node_type IF NOT EXISTS FOR (n:Node) ON (n.type)")
-            await session.run("CREATE INDEX node_status IF NOT EXISTS FOR (n:Node) ON (n.status)")
 
-    async def add_node(
-        self,
-        node_id: str,
-        node_type: NodeType,
-        data: dict[str, Any],
-        status: MemoryStatus = MemoryStatus.NEW,
-    ) -> None:
-        """Add a node to the graph."""
-        driver = await self._get_driver()
+            # Create indices for fast lookups
+            await session.run(
+                "CREATE INDEX memory_status IF NOT EXISTS " "FOR (m:Memory) ON (m.status)"
+            )
 
-        async with driver.session() as session:
+            await session.run(
+                "CREATE INDEX memory_type IF NOT EXISTS " "FOR (m:Memory) ON (m.type)"
+            )
+
+            await session.run(
+                "CREATE INDEX memory_created IF NOT EXISTS " "FOR (m:Memory) ON (m.created_at)"
+            )
+
+            await session.run(
+                "CREATE INDEX memory_version IF NOT EXISTS " "FOR (m:Memory) ON (m.version)"
+            )
+
+    # ═══════════════════════════════════════════════════════════
+    # NODE OPERATIONS
+    # ═══════════════════════════════════════════════════════════
+
+    async def add_node(self, memory: Memory) -> None:
+        """Add a memory node to the graph."""
+        await self.connect()
+
+        async with self.driver.session(database=self.database) as session:
             await session.run(
                 """
-                MERGE (n:Node {id: $id})
-                SET n.type = $type,
-                    n.data = $data,
-                    n.status = $status,
-                    n.created_at = $created_at,
-                    n.access_count = COALESCE(n.access_count, 0)
-            """,
+                MERGE (m:Memory {id: $id})
+                SET m.content = $content,
+                    m.type = $type,
+                    m.version = $version,
+                    m.parent_version = $parent_version,
+                    m.valid_from = $valid_from,
+                    m.valid_until = $valid_until,
+                    m.status = $status,
+                    m.superseded_by = $superseded_by,
+                    m.invalidation_reason = $invalidation_reason,
+                    m.confidence = $confidence,
+                    m.access_count = $access_count,
+                    m.last_accessed = $last_accessed,
+                    m.created_at = $created_at,
+                    m.updated_at = $updated_at,
+                    m.metadata = $metadata
+                """,
                 {
-                    "id": node_id,
-                    "type": node_type.value,
-                    "data": str(data),
-                    "status": status.value,
-                    "created_at": datetime.now(UTC).isoformat(),
+                    "id": memory.id,
+                    "content": memory.content,
+                    "type": memory.type.value,
+                    "version": memory.version,
+                    "parent_version": memory.parent_version,
+                    "valid_from": memory.valid_from.isoformat(),
+                    "valid_until": memory.valid_until.isoformat() if memory.valid_until else None,
+                    "status": memory.status.value,
+                    "superseded_by": memory.superseded_by,
+                    "invalidation_reason": memory.invalidation_reason,
+                    "confidence": memory.confidence,
+                    "access_count": memory.access_count,
+                    "last_accessed": (
+                        memory.last_accessed.isoformat() if memory.last_accessed else None
+                    ),
+                    "created_at": memory.created_at.isoformat(),
+                    "updated_at": memory.updated_at.isoformat(),
+                    "metadata": json.dumps(memory.metadata),
                 },
             )
 
-    async def add_edge(
-        self,
-        source_id: str,
-        target_id: str,
-        edge_type: RelationshipType,
-        weight: float = 1.0,
-        metadata: dict[str, Any] | None = None,
-    ) -> str:
-        """Add an edge between two nodes."""
-        from uuid import uuid4
+    async def get_node(self, node_id: str) -> Memory | None:
+        """Retrieve a memory node by ID."""
+        await self.connect()
 
-        driver = await self._get_driver()
-        edge_id = str(uuid4())
-
-        async with driver.session() as session:
-            # Use dynamic relationship type based on edge_type
-            await session.run(
-                f"""
-                MATCH (a:Node {{id: $source_id}})
-                MATCH (b:Node {{id: $target_id}})
-                CREATE (a)-[r:{edge_type.value.upper()} {{
-                    id: $edge_id,
-                    weight: $weight,
-                    metadata: $metadata,
-                    created_at: $created_at
-                }}]->(b)
-            """,
-                {
-                    "source_id": source_id,
-                    "target_id": target_id,
-                    "edge_id": edge_id,
-                    "weight": weight,
-                    "metadata": str(metadata) if metadata else None,
-                    "created_at": datetime.now(UTC).isoformat(),
-                },
-            )
-
-        return edge_id
-
-    async def get_node(self, node_id: str) -> Node | None:
-        """Retrieve a node by ID."""
-        driver = await self._get_driver()
-
-        async with driver.session() as session:
-            result = await session.run("MATCH (n:Node {id: $id}) RETURN n", {"id": node_id})
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run("MATCH (m:Memory {id: $id}) RETURN m", {"id": node_id})
 
             record = await result.single()
             if not record:
                 return None
 
-            node_data = dict(record["n"])
+            node = record["m"]
+            return self._node_to_memory(node)
 
-            import ast
+    async def update_node(self, memory: Memory) -> None:
+        """Update an existing memory node."""
+        await self.add_node(memory)  # MERGE handles updates
 
-            return Node(
-                id=node_data["id"],
-                type=NodeType(node_data["type"]),
-                data=ast.literal_eval(node_data["data"]),
-                status=MemoryStatus(node_data["status"]),
-                created_at=datetime.fromisoformat(node_data["created_at"]).replace(
-                    tzinfo=UTC
-                ),
-                last_accessed=(
-                    datetime.fromisoformat(node_data["last_accessed"])
-                    if node_data.get("last_accessed")
-                    else None
-                ),
-                access_count=node_data.get("access_count", 0),
+    async def delete_node(self, node_id: str) -> None:
+        """Delete a node and its edges."""
+        await self.connect()
+
+        async with self.driver.session(database=self.database) as session:
+            await session.run("MATCH (m:Memory {id: $id}) DETACH DELETE m", {"id": node_id})
+
+    async def query_memories(
+        self,
+        filters: dict[str, Any] | None = None,
+        order_by: str | None = None,
+        limit: int = 100,
+    ) -> list[Memory]:
+        """Query memories with filters."""
+        await self.connect()
+
+        query = "MATCH (m:Memory) WHERE 1=1"
+        params = {}
+
+        if filters:
+            if "status" in filters:
+                query += " AND m.status = $status"
+                params["status"] = filters["status"]
+
+            if "type" in filters:
+                query += " AND m.type = $type"
+                params["type"] = filters["type"]
+
+            if "created_after" in filters:
+                query += " AND m.created_at > $created_after"
+                params["created_after"] = filters["created_after"]
+
+            if "created_before" in filters:
+                query += " AND m.created_at < $created_before"
+                params["created_before"] = filters["created_before"]
+
+            if "access_count_lt" in filters:
+                query += " AND m.access_count < $access_count_lt"
+                params["access_count_lt"] = filters["access_count_lt"]
+
+        query += " RETURN m"
+
+        if order_by:
+            # Parse order_by (e.g., "created_at DESC")
+            query += f" ORDER BY m.{order_by}"
+
+        query += f" LIMIT {limit}"
+
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run(query, params)
+
+            memories = []
+            async for record in result:
+                memories.append(self._node_to_memory(record["m"]))
+
+            return memories
+
+    async def get_random_memories(
+        self, filters: dict[str, Any] | None = None, limit: int = 10
+    ) -> list[Memory]:
+        """Get random memories for sampling."""
+        await self.connect()
+
+        query = "MATCH (m:Memory) WHERE 1=1"
+        params = {}
+
+        if filters:
+            if "status" in filters:
+                query += " AND m.status = $status"
+                params["status"] = filters["status"]
+
+        query += f" RETURN m ORDER BY rand() LIMIT {limit}"
+
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run(query, params)
+
+            memories = []
+            async for record in result:
+                memories.append(self._node_to_memory(record["m"]))
+
+            return memories
+
+    # ═══════════════════════════════════════════════════════════
+    # EDGE OPERATIONS
+    # ═══════════════════════════════════════════════════════════
+
+    async def add_edge(self, edge: dict[str, Any] | Edge) -> str:
+        """Add an edge between two nodes."""
+        await self.connect()
+
+        # Handle both dict and Edge object
+        if isinstance(edge, Edge):
+            source_id = edge.source
+            target_id = edge.target
+            edge_type = edge.type.value if isinstance(edge.type, RelationshipType) else edge.type
+            confidence = edge.confidence
+            metadata = edge.metadata
+            created_at = edge.created_at.isoformat()
+        else:
+            source_id = edge["source"]
+            target_id = edge["target"]
+            edge_type = edge["type"]
+            confidence = edge.get("metadata", {}).get("confidence", 1.0)
+            metadata = edge.get("metadata", {})
+            created_at = datetime.now().isoformat()
+
+        edge_id = str(uuid4())
+
+        async with self.driver.session(database=self.database) as session:
+            # Use dynamic relationship type
+            await session.run(
+                f"""
+                MATCH (a:Memory {{id: $source_id}})
+                MATCH (b:Memory {{id: $target_id}})
+                CREATE (a)-[r:{edge_type.upper()} {{
+                    id: $edge_id,
+                    confidence: $confidence,
+                    created_at: $created_at,
+                    metadata: $metadata
+                }}]->(b)
+                """,
+                {
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "edge_id": edge_id,
+                    "confidence": confidence,
+                    "created_at": created_at,
+                    "metadata": json.dumps(metadata),
+                },
             )
+
+        return edge_id
+
+    async def get_edge(self, edge_id: str) -> dict[str, Any] | None:
+        """Get edge by ID."""
+        await self.connect()
+
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run(
+                """
+                MATCH (a)-[r {id: $edge_id}]->(b)
+                RETURN r, type(r) as edge_type, a.id as source, b.id as target
+                """,
+                {"edge_id": edge_id},
+            )
+
+            record = await result.single()
+            if not record:
+                return None
+
+            rel = record["r"]
+            return {
+                "id": rel["id"],
+                "source": record["source"],
+                "target": record["target"],
+                "type": record["edge_type"],
+                "confidence": rel.get("confidence", 1.0),
+                "created_at": rel["created_at"],
+                "metadata": json.loads(rel.get("metadata", "{}")),
+            }
+
+    async def get_edge_between(
+        self, source_id: str, target_id: str, relationship_type: str | None = None
+    ) -> dict[str, Any] | None:
+        """Find edge between two nodes."""
+        await self.connect()
+
+        query = """
+        MATCH (a:Memory {id: $source_id})-[r]->(b:Memory {id: $target_id})
+        """
+
+        params = {"source_id": source_id, "target_id": target_id}
+
+        if relationship_type:
+            query = f"""
+            MATCH (a:Memory {{id: $source_id}})-[r:{relationship_type.upper()}]->(b:Memory {{id: $target_id}})
+            """
+
+        query += " RETURN r, type(r) as edge_type LIMIT 1"
+
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run(query, params)
+
+            record = await result.single()
+            if not record:
+                # Check reverse for undirected relationships
+                if not relationship_type or relationship_type in ["CO_OCCURS", "SIMILAR_TO"]:
+                    result = await session.run(
+                        """
+                        MATCH (a:Memory {id: $target_id})-[r]->(b:Memory {id: $source_id})
+                        RETURN r, type(r) as edge_type LIMIT 1
+                        """,
+                        params,
+                    )
+                    record = await result.single()
+
+            if not record:
+                return None
+
+            rel = record["r"]
+            return {
+                "id": rel["id"],
+                "source": source_id,
+                "target": target_id,
+                "type": record["edge_type"],
+                "confidence": rel.get("confidence", 1.0),
+                "created_at": rel["created_at"],
+                "metadata": json.loads(rel.get("metadata", "{}")),
+            }
+
+    async def update_edge(self, edge: dict[str, Any]) -> None:
+        """Update edge metadata."""
+        await self.connect()
+
+        async with self.driver.session(database=self.database) as session:
+            await session.run(
+                """
+                MATCH ()-[r {id: $edge_id}]->()
+                SET r.confidence = $confidence,
+                    r.metadata = $metadata
+                """,
+                {
+                    "edge_id": edge["id"],
+                    "confidence": edge.get("confidence", 1.0),
+                    "metadata": json.dumps(edge.get("metadata", {})),
+                },
+            )
+
+    async def delete_edge(self, edge_id: str) -> None:
+        """Delete an edge."""
+        await self.connect()
+
+        async with self.driver.session(database=self.database) as session:
+            await session.run("MATCH ()-[r {id: $edge_id}]->() DELETE r", {"edge_id": edge_id})
+
+    # ═══════════════════════════════════════════════════════════
+    # GRAPH TRAVERSAL
+    # ═══════════════════════════════════════════════════════════
 
     async def get_neighbors(
         self,
         node_id: str,
-        edge_types: list[RelationshipType] | None = None,
+        relationship_types: list[str] | None = None,
         direction: str = "outgoing",
-    ) -> list[dict[str, Any]]:
+        depth: int = 1,
+        limit: int = 100,
+    ) -> list[tuple[Memory, Edge]]:
         """Get neighboring nodes."""
-        driver = await self._get_driver()
+        await self.connect()
 
+        # Build pattern based on direction
         if direction == "outgoing":
-            pattern = "(n)-[r]->(neighbor)"
+            pattern = "(m)-[r]->(n)"
         elif direction == "incoming":
-            pattern = "(n)<-[r]-(neighbor)"
+            pattern = "(m)<-[r]-(n)"
         else:  # both
-            pattern = "(n)-[r]-(neighbor)"
+            pattern = "(m)-[r]-(n)"
 
-        query = f"MATCH {pattern} WHERE n.id = $node_id"
+        # Build relationship type filter
+        if relationship_types:
+            rel_types = "|".join([rt.upper() for rt in relationship_types])
+            pattern = pattern.replace("-[r]-", f"-[r:{rel_types}]-")
 
-        if edge_types:
-            type_filter = " OR ".join([f"type(r) = '{et.value.upper()}'" for et in edge_types])
-            query += f" AND ({type_filter})"
+        # Build query with depth
+        if depth > 1:
+            pattern = pattern.replace("[r]", f"[r*1..{depth}]")
 
-        query += " RETURN neighbor, type(r) as edge_type, r.weight as weight, r.id as edge_id, r.metadata as metadata"
+        # Include type(r) in the return to get the relationship type
+        query = (
+            f"MATCH {pattern} WHERE m.id = $node_id RETURN n, r, type(r) as rel_type LIMIT {limit}"
+        )
 
-        async with driver.session() as session:
+        async with self.driver.session(database=self.database) as session:
             result = await session.run(query, {"node_id": node_id})
 
             neighbors = []
             async for record in result:
-                node_data = dict(record["neighbor"])
+                node = record["n"]
+                rel = record["r"]
+                rel_type = record["rel_type"]
 
-                import ast
+                # Handle both single relationship and path
+                if isinstance(rel, list):
+                    # Path with multiple relationships - use first relationship type
+                    edge_info = Edge(
+                        source=node_id,
+                        target=node["id"],
+                        type=RelationshipType(rel_type),
+                        confidence=rel[0].get("confidence", 1.0) if rel else 1.0,
+                        created_at=datetime.fromisoformat(
+                            rel[0].get("created_at", datetime.now().isoformat())
+                            if rel
+                            else datetime.now().isoformat()
+                        ),
+                        metadata={},
+                    )
+                else:
+                    # Single relationship
+                    edge_info = Edge(
+                        source=node_id,
+                        target=node["id"],
+                        type=RelationshipType(rel_type),
+                        confidence=rel.get("confidence", 1.0),
+                        created_at=datetime.fromisoformat(
+                            rel.get("created_at", datetime.now().isoformat())
+                        ),
+                        metadata=json.loads(rel.get("metadata", "{}")),
+                    )
 
-                neighbors.append(
-                    {
-                        "node": Node(
-                            id=node_data["id"],
-                            type=NodeType(node_data["type"]),
-                            data=ast.literal_eval(node_data["data"]),
-                            status=MemoryStatus(node_data["status"]),
-                            created_at=datetime.fromisoformat(node_data["created_at"]).replace(
-                                tzinfo=UTC
-                            ),
-                            last_accessed=(
-                                datetime.fromisoformat(node_data["last_accessed"])
-                                if node_data.get("last_accessed")
-                                else None
-                            ),
-                            access_count=node_data.get("access_count", 0),
-                        ),
-                        "edge_type": RelationshipType(record["edge_type"].lower()),
-                        "edge_weight": record["weight"],
-                        "edge_id": record["edge_id"],
-                        "edge_metadata": (
-                            ast.literal_eval(record["metadata"]) if record["metadata"] else None
-                        ),
-                    }
-                )
+                neighbors.append((self._node_to_memory(node), edge_info))
 
             return neighbors
 
-    async def update_node_status(self, node_id: str, status: MemoryStatus) -> None:
-        """Update node status."""
-        driver = await self._get_driver()
+    async def find_path(self, start_id: str, end_id: str, max_depth: int = 5) -> list[str] | None:
+        """Find shortest path between two nodes."""
+        await self.connect()
 
-        async with driver.session() as session:
-            await session.run(
-                "MATCH (n:Node {id: $id}) SET n.status = $status",
-                {"id": node_id, "status": status.value},
-            )
-
-    async def update_node_access(
-        self, node_id: str, access_count: int, last_accessed: datetime
-    ) -> None:
-        """Update node access tracking."""
-        driver = await self._get_driver()
-
-        async with driver.session() as session:
-            await session.run(
-                """
-                MATCH (n:Node {id: $id})
-                SET n.access_count = $access_count,
-                    n.last_accessed = $last_accessed
-            """,
-                {
-                    "id": node_id,
-                    "access_count": access_count,
-                    "last_accessed": last_accessed.replace(tzinfo=UTC).isoformat(),
-                },
-            )
-
-    async def update_edge_weight(self, edge_id: str, weight: float) -> None:
-        """Update edge weight."""
-        driver = await self._get_driver()
-
-        async with driver.session() as session:
-            await session.run(
-                "MATCH ()-[r {id: $edge_id}]->() SET r.weight = $weight",
-                {"edge_id": edge_id, "weight": weight},
-            )
-
-    async def mark_forgotten(self, node_id: str) -> None:
-        """Mark a node as forgotten."""
-        await self.update_node_status(node_id, MemoryStatus.FORGOTTEN)
-
-    async def find_path(
-        self, start_id: str, end_id: str, max_depth: int = 3
-    ) -> list[str] | None:
-        """Find path between two nodes."""
-        driver = await self._get_driver()
-
-        async with driver.session() as session:
-            # Build query with max_depth properly
-            query = f"""
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run(
+                f"""
                 MATCH path = shortestPath(
-                    (start:Node {{id: $start_id}})-[*..{max_depth}]->(end:Node {{id: $end_id}})
+                    (start:Memory {{id: $start_id}})-[*..{max_depth}]-(end:Memory {{id: $end_id}})
                 )
                 RETURN [node in nodes(path) | node.id] as node_ids
-            """
-
-            result = await session.run(query, {"start_id": start_id, "end_id": end_id})
+                """,
+                {"start_id": start_id, "end_id": end_id},
+            )
 
             record = await result.single()
             if not record:
@@ -277,15 +488,75 @@ class Neo4jGraphStore(GraphStore):
 
             return record["node_ids"]
 
-    async def delete_node(self, node_id: str) -> None:
-        """Delete a node and its edges."""
-        driver = await self._get_driver()
+    # ═══════════════════════════════════════════════════════════
+    # UTILITY METHODS
+    # ═══════════════════════════════════════════════════════════
 
-        async with driver.session() as session:
-            await session.run("MATCH (n:Node {id: $id}) DETACH DELETE n", {"id": node_id})
+    async def count_nodes(self, filters: dict[str, Any] | None = None) -> int:
+        """Count nodes matching filters."""
+        await self.connect()
+
+        query = "MATCH (m:Memory) WHERE 1=1"
+        params = {}
+
+        if filters:
+            if "status" in filters:
+                query += " AND m.status = $status"
+                params["status"] = filters["status"]
+
+        query += " RETURN count(m) as count"
+
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run(query, params)
+            record = await result.single()
+            return record["count"] if record else 0
+
+    async def count_edges(self, relationship_type: str | None = None) -> int:
+        """Count edges."""
+        await self.connect()
+
+        if relationship_type:
+            query = f"MATCH ()-[r:{relationship_type.upper()}]->() RETURN count(r) as count"
+        else:
+            query = "MATCH ()-[r]->() RETURN count(r) as count"
+
+        async with self.driver.session(database=self.database) as session:
+            result = await session.run(query)
+            record = await result.single()
+            return record["count"] if record else 0
 
     async def close(self) -> None:
         """Close the Neo4j driver."""
-        if self.driver:
+        if self.driver is not None:
             await self.driver.close()
             self.driver = None
+
+    # ═══════════════════════════════════════════════════════════
+    # HELPER METHODS
+    # ═══════════════════════════════════════════════════════════
+
+    def _node_to_memory(self, node) -> Memory:
+        """Convert Neo4j node to Memory object."""
+        return Memory(
+            id=node["id"],
+            content=node["content"],
+            type=NodeType(node["type"]),
+            embedding=[],  # Embeddings stored in vector store
+            version=node.get("version", 1),
+            parent_version=node.get("parent_version"),
+            valid_from=datetime.fromisoformat(node["valid_from"]),
+            valid_until=(
+                datetime.fromisoformat(node["valid_until"]) if node.get("valid_until") else None
+            ),
+            status=MemoryStatus(node["status"]),
+            superseded_by=node.get("superseded_by"),
+            invalidation_reason=node.get("invalidation_reason"),
+            confidence=node.get("confidence", 1.0),
+            access_count=node.get("access_count", 0),
+            last_accessed=(
+                datetime.fromisoformat(node["last_accessed"]) if node.get("last_accessed") else None
+            ),
+            created_at=datetime.fromisoformat(node["created_at"]),
+            updated_at=datetime.fromisoformat(node["updated_at"]),
+            metadata=json.loads(node.get("metadata", "{}")),
+        )
