@@ -33,8 +33,7 @@ class AddMemoryRequest(BaseModel):
     """Request model for adding a memory."""
 
     text: str = Field(..., description="Memory text content")
-    metadata: dict[str, Any] | None = Field(
-        default=None, description="Optional metadata")
+    metadata: dict[str, Any] | None = Field(default=None, description="Optional metadata")
     memory_id: str | None = Field(default=None, description="Custom memory ID")
     auto_infer_relationships: bool | None = Field(
         default=None, description="Auto-infer relationships"
@@ -317,7 +316,7 @@ async def get_memory(memory_id: str, include_relationships: bool = Query(default
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        memory = await engine.get_memory(memory_id, validate=False)
+        memory = await engine.get_memory(memory_id, validate=True)
 
         if not memory:
             raise HTTPException(status_code=404, detail="Memory not found")
@@ -380,7 +379,7 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
             )
         else:
             # Just metadata update
-            memory = await engine.get_memory(memory_id, validate=False)
+            memory = await engine.get_memory(memory_id, validate=True)
             if not memory:
                 raise HTTPException(status_code=404, detail="Memory not found")
 
@@ -425,8 +424,7 @@ async def add_conversation(request: AddConversationRequest):
     the conversation order.
     Note: This endpoint is under development for the new architecture.
     """
-    raise HTTPException(
-        status_code=501, detail="Conversation endpoints coming soon")
+    raise HTTPException(status_code=501, detail="Conversation endpoints coming soon")
 
 
 # Document endpoints (Coming soon)
@@ -439,8 +437,7 @@ async def add_document(request: AddDocumentRequest):
     and infers semantic connections between chunks.
     Note: This endpoint is under development for the new architecture.
     """
-    raise HTTPException(
-        status_code=501, detail="Document endpoints coming soon")
+    raise HTTPException(status_code=501, detail="Document endpoints coming soon")
 
 
 # Statistics endpoint
@@ -478,5 +475,4 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app:app", host="0.0.0.0", port=8000,
-                reload=True, log_level="info")
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")

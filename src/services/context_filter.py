@@ -38,6 +38,18 @@ class RelevanceScore(BaseModel):
     )
 
 
+class EntityList(BaseModel):
+    """List of entities extracted from text."""
+
+    model_config = {"extra": "ignore"}
+
+    entities: list[str] = Field(
+        ...,
+        description="REQUIRED: List of key entities (people, places, organizations, concepts) extracted from the text. Maximum 5 entities.",
+        max_length=5,
+    )
+
+
 class MultiStageFilter:
     """
     Efficient multi-stage filtering to narrow context for LLM.
@@ -263,23 +275,23 @@ Context Gathering Performance:
         try:
             # Use LLM to extract entities from the memory
             entity_prompt = f"""
-Extract key entities from this text. Return a JSON array of entity names (max 5).
+Extract key entities from this text. Identify important people, places, organizations, concepts, or technical terms.
 
 Text: {memory.content}
 
-Return format: ["entity1", "entity2", "entity3"]
+Return a JSON object with a list of up to 5 key entities.
 """
 
-            entities = await self.llm.complete(
-                entity_prompt, response_format=list[str], max_tokens=100, temperature=0.0
+            result = await self.llm.complete(
+                entity_prompt, response_format=EntityList, max_tokens=100, temperature=0.0
             )
 
-            if not entities:
+            if not result.entities:
                 return []
 
             # Find memories with these entities
             candidates = []
-            for entity in entities[:5]:  # Top 5 entities
+            for entity in result.entities[:5]:  # Top 5 entities
                 try:
                     related = await self.vector_store.search_by_payload(
                         filter={"entities": {"$contains": entity}}, limit=5

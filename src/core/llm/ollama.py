@@ -19,7 +19,10 @@ class OllamaLLM(LLMProvider):
     """
 
     def __init__(
-        self, host: str = "http://localhost:11434", model: str = "llama3.1", timeout: float = 120.0
+        self,
+        host: str = "http://localhost:11434",
+        model: str = "llama3.1:8b",
+        timeout: float = 120.0,
     ):
         """
         Initialize Ollama LLM provider.

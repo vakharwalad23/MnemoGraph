@@ -59,11 +59,9 @@ class LLMRelationshipEngine:
         self.config = config
 
         # Initialize sub-systems
-        self.filter = MultiStageFilter(
-            vector_store, graph_store, llm_provider, config)
+        self.filter = MultiStageFilter(vector_store, graph_store, llm_provider, config)
 
-        self.invalidation = InvalidationManager(
-            llm_provider, graph_store, vector_store)
+        self.invalidation = InvalidationManager(llm_provider, graph_store, vector_store)
 
     async def process_new_memory(self, memory: Memory) -> RelationshipBundle:
         """
@@ -108,8 +106,7 @@ class LLMRelationshipEngine:
             extraction_task, upsert_task, node_task, return_exceptions=True
         )
 
-        extraction = results[0] if not isinstance(
-            results[0], Exception) else None
+        extraction = results[0] if not isinstance(results[0], Exception) else None
 
         if not extraction:
             print("❌ LLM extraction failed")
@@ -123,13 +120,11 @@ class LLMRelationshipEngine:
             )
 
         # Step 4: Create edges in parallel
-        print(
-            f"🔗 Creating {len(extraction.relationships)} relationship edges...")
+        print(f"🔗 Creating {len(extraction.relationships)} relationship edges...")
         edge_tasks = []
 
         min_confidence = getattr(
-            getattr(self.config, "llm_relationships",
-                    None), "min_confidence", 0.5
+            getattr(self.config, "llm_relationships", None), "min_confidence", 0.5
         )
 
         for rel in extraction.relationships:
@@ -142,8 +137,7 @@ class LLMRelationshipEngine:
 
         # Step 5: Handle derived memories
         if extraction.derived_insights:
-            print(
-                f"💡 Creating {len(extraction.derived_insights)} derived memories...")
+            print(f"💡 Creating {len(extraction.derived_insights)} derived memories...")
             await self._create_derived_memories(extraction.derived_insights, memory)
 
         # Step 6: Event-driven invalidation check
@@ -342,8 +336,7 @@ Begin extraction:
 
         lines = []
         for mem in memories:
-            preview = mem.content[:80] + \
-                "..." if len(mem.content) > 80 else mem.content
+            preview = mem.content[:80] + "..." if len(mem.content) > 80 else mem.content
             lines.append(f"- [{mem.id}] {preview}")
         return "\n".join(lines)
 
