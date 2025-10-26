@@ -15,9 +15,7 @@ from src.services.context_filter import MultiStageFilter
 class TestMultiStageFilterUnit:
     """Unit tests for MultiStageFilter."""
 
-    async def test_initialization(
-        self, mock_vector_store, sqlite_graph_store, mock_llm, config
-    ):
+    async def test_initialization(self, mock_vector_store, sqlite_graph_store, mock_llm, config):
         """Test filter initialization."""
         filter_service = MultiStageFilter(
             vector_store=mock_vector_store,
@@ -32,7 +30,13 @@ class TestMultiStageFilterUnit:
         assert filter_service.config == config
 
     async def test_stage1_vector_search(
-        self, mock_vector_store, sqlite_graph_store, mock_llm, config, sample_memory, sample_memories
+        self,
+        mock_vector_store,
+        sqlite_graph_store,
+        mock_llm,
+        config,
+        sample_memory,
+        sample_memories,
     ):
         """Test stage 1 vector search."""
         # Setup
@@ -54,7 +58,13 @@ class TestMultiStageFilterUnit:
         assert all(isinstance(m, Memory) for m in results)
 
     async def test_temporal_filter(
-        self, mock_vector_store, sqlite_graph_store, mock_llm, config, sample_memory, sample_memories
+        self,
+        mock_vector_store,
+        sqlite_graph_store,
+        mock_llm,
+        config,
+        sample_memory,
+        sample_memories,
     ):
         """Test temporal filtering."""
         filter_service = MultiStageFilter(
@@ -159,7 +169,7 @@ class TestMultiStageFilterUnit:
             id="test_conv_mem",
             content="New message",
             type=NodeType.MEMORY,
-            embedding=[0.5] * 16,
+            embedding=[0.5] * 768,
             metadata={"conversation_id": "conv_123"},
         )
 
@@ -181,8 +191,7 @@ class TestMultiStageFilterUnit:
         )
 
         # Create list with duplicates
-        memories_with_dupes = sample_memories + \
-            [sample_memories[0], sample_memories[1]]
+        memories_with_dupes = sample_memories + [sample_memories[0], sample_memories[1]]
 
         # Deduplicate
         unique = filter_service._deduplicate(memories_with_dupes)
@@ -211,8 +220,7 @@ class TestMultiStageFilterUnit:
             "conversation": [],
         }
 
-        combined = filter_service._combine_and_deduplicate(
-            vector_candidates, context_results)
+        combined = filter_service._combine_and_deduplicate(vector_candidates, context_results)
 
         assert isinstance(combined, list)
         assert all(isinstance(m, Memory) for m in combined)
@@ -228,7 +236,13 @@ class TestMultiStageFilterSQLite:
     """Integration tests with SQLite."""
 
     async def test_gather_context_sqlite(
-        self, mock_vector_store, sqlite_graph_store, mock_llm, config, sample_memory, sample_memories
+        self,
+        mock_vector_store,
+        sqlite_graph_store,
+        mock_llm,
+        config,
+        sample_memory,
+        sample_memories,
     ):
         """Test full context gathering with SQLite."""
         filter_service = MultiStageFilter(

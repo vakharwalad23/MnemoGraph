@@ -4,8 +4,9 @@ Tests for InvalidationManager service.
 Tests memory invalidation, validation, and supersession checking.
 """
 
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
 
 from src.models.memory import Memory, MemoryStatus, NodeType
 from src.services.invalidation_manager import InvalidationManager
@@ -56,19 +57,17 @@ class TestInvalidationManagerUnit:
             id="recent_mem",
             content="Recent memory",
             type=NodeType.MEMORY,
-            embedding=[0.1] * 16,
+            embedding=[0.1] * 768,
             created_at=datetime.now() - timedelta(days=10),
             updated_at=datetime.now(),
         )
-        recent_mem.metadata["last_validated"] = (
-            datetime.now() - timedelta(days=50)).isoformat()
+        recent_mem.metadata["last_validated"] = (datetime.now() - timedelta(days=50)).isoformat()
 
         # Should not validate (validated 50 days ago, needs 90 days)
         assert manager._should_validate(recent_mem) is False
 
         # Update last validation to 100 days ago
-        recent_mem.metadata["last_validated"] = (
-            datetime.now() - timedelta(days=100)).isoformat()
+        recent_mem.metadata["last_validated"] = (datetime.now() - timedelta(days=100)).isoformat()
         assert manager._should_validate(recent_mem) is True
 
     async def test_should_validate_old_memory(
@@ -86,12 +85,11 @@ class TestInvalidationManagerUnit:
             id="old_mem",
             content="Old memory",
             type=NodeType.MEMORY,
-            embedding=[0.1] * 16,
+            embedding=[0.1] * 768,
             created_at=datetime.now() - timedelta(days=200),
             updated_at=datetime.now(),
         )
-        old_mem.metadata["last_validated"] = (
-            datetime.now() - timedelta(days=20)).isoformat()
+        old_mem.metadata["last_validated"] = (datetime.now() - timedelta(days=20)).isoformat()
 
         # Should validate (validated 20 days ago, needs 14 days for old memories)
         assert manager._should_validate(old_mem) is True
@@ -180,7 +178,7 @@ class TestInvalidationManagerSQLite:
             id="invalid_mem",
             content="Invalidated",
             type=NodeType.MEMORY,
-            embedding=[0.1] * 16,
+            embedding=[0.1] * 768,
             status=MemoryStatus.INVALIDATED,
         )
 
@@ -240,7 +238,7 @@ class TestInvalidationManagerSQLite:
             id="new_mem",
             content="Updated information about programming",
             type=NodeType.MEMORY,
-            embedding=[0.8] * 16,
+            embedding=[0.8] * 768,
         )
 
         # Check supersession
@@ -311,7 +309,7 @@ class TestInvalidationManagerNeo4j:
             id="new_mem",
             content="Updated information",
             type=NodeType.MEMORY,
-            embedding=[0.9] * 16,
+            embedding=[0.9] * 768,
         )
 
         # Check supersession
@@ -345,6 +343,7 @@ class TestInvalidationManagerBackgroundWorker:
 
         # Wait a bit for cancellation
         import asyncio
+
         await asyncio.sleep(0.1)
 
         assert manager._worker_task.cancelled() or manager._worker_task.done()

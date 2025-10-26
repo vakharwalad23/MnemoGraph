@@ -4,8 +4,9 @@ Tests for MemoryEvolutionService.
 Tests memory versioning, evolution analysis, and time travel queries.
 """
 
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
 
 from src.models.memory import Memory, MemoryStatus, NodeType
 from src.services.memory_evolution import MemoryEvolutionService
@@ -85,9 +86,7 @@ class TestMemoryEvolutionServiceSQLite:
             assert new_mem is not None
             assert new_mem.version == sample_memory.version + 1
 
-    async def test_evolve_memory_augment_sqlite(
-        self, mock_llm, sqlite_graph_store, mock_embedder
-    ):
+    async def test_evolve_memory_augment_sqlite(self, mock_llm, sqlite_graph_store, mock_embedder):
         """Test memory evolution with augment action."""
         # Setup mock to return augment action
         from src.services.memory_evolution import EvolutionAnalysis
@@ -112,7 +111,7 @@ class TestMemoryEvolutionServiceSQLite:
             id="mem_aug",
             content="Original content",
             type=NodeType.MEMORY,
-            embedding=[0.1] * 16,
+            embedding=[0.1] * 768,
         )
 
         await sqlite_graph_store.add_node(mem)
@@ -147,9 +146,7 @@ class TestMemoryEvolutionServiceSQLite:
         )
 
         # Create new version
-        new_version = await service._create_new_version(
-            sample_memory, "New content", analysis
-        )
+        new_version = await service._create_new_version(sample_memory, "New content", analysis)
 
         assert new_version is not None
         assert new_version.version == sample_memory.version + 1
@@ -231,13 +228,12 @@ class TestMemoryEvolutionServiceSQLite:
 
             assert rolled_back is not None
             assert rolled_back.content == sample_memory.content
-            assert "rollback" in rolled_back.id or "rollback" in rolled_back.metadata.get(
-                "rollback_reason", ""
-            ).lower()
+            assert (
+                "rollback" in rolled_back.id
+                or "rollback" in rolled_back.metadata.get("rollback_reason", "").lower()
+            )
 
-    async def test_time_travel_query_sqlite(
-        self, mock_llm, sqlite_graph_store, mock_embedder
-    ):
+    async def test_time_travel_query_sqlite(self, mock_llm, sqlite_graph_store, mock_embedder):
         """Test time travel query."""
         service = MemoryEvolutionService(
             llm=mock_llm,
@@ -250,7 +246,7 @@ class TestMemoryEvolutionServiceSQLite:
             id="old_mem",
             content="Old version",
             type=NodeType.MEMORY,
-            embedding=[0.1] * 16,
+            embedding=[0.1] * 768,
             valid_from=datetime.now() - timedelta(days=100),
             valid_until=datetime.now() - timedelta(days=50),
             status=MemoryStatus.SUPERSEDED,
@@ -260,7 +256,7 @@ class TestMemoryEvolutionServiceSQLite:
             id="new_mem",
             content="New version",
             type=NodeType.MEMORY,
-            embedding=[0.1] * 16,
+            embedding=[0.1] * 768,
             valid_from=datetime.now() - timedelta(days=50),
             status=MemoryStatus.ACTIVE,
         )

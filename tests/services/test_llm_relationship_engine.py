@@ -5,9 +5,8 @@ Tests relationship extraction, derived insights, and edge creation.
 """
 
 import pytest
-from datetime import datetime
 
-from src.models.memory import Memory, NodeType
+from src.models.memory import NodeType
 from src.models.relationships import RelationshipType
 from src.services.llm_relationship_engine import LLMRelationshipEngine
 
@@ -36,7 +35,13 @@ class TestLLMRelationshipEngineUnit:
         assert engine.config == config
 
     async def test_format_memories_detailed(
-        self, mock_llm, mock_embedder, mock_vector_store, sqlite_graph_store, config, sample_memories
+        self,
+        mock_llm,
+        mock_embedder,
+        mock_vector_store,
+        sqlite_graph_store,
+        config,
+        sample_memories,
     ):
         """Test detailed memory formatting."""
         engine = LLMRelationshipEngine(
@@ -56,7 +61,13 @@ class TestLLMRelationshipEngineUnit:
             assert mem.id in formatted
 
     async def test_format_memories_compact(
-        self, mock_llm, mock_embedder, mock_vector_store, sqlite_graph_store, config, sample_memories
+        self,
+        mock_llm,
+        mock_embedder,
+        mock_vector_store,
+        sqlite_graph_store,
+        config,
+        sample_memories,
     ):
         """Test compact memory formatting."""
         engine = LLMRelationshipEngine(
@@ -152,7 +163,13 @@ class TestLLMRelationshipEngineSQLite:
         assert result.memory_id == sample_memory.id
 
     async def test_process_memory_with_context_sqlite(
-        self, mock_llm, mock_embedder, mock_vector_store, sqlite_graph_store, config, sample_memories
+        self,
+        mock_llm,
+        mock_embedder,
+        mock_vector_store,
+        sqlite_graph_store,
+        config,
+        sample_memories,
     ):
         """Test processing with existing context."""
         engine = LLMRelationshipEngine(
@@ -211,7 +228,13 @@ class TestLLMRelationshipEngineSQLite:
         assert count > 0
 
     async def test_edge_creation_with_confidence_filter_sqlite(
-        self, mock_llm, mock_embedder, mock_vector_store, sqlite_graph_store, config, sample_memories
+        self,
+        mock_llm,
+        mock_embedder,
+        mock_vector_store,
+        sqlite_graph_store,
+        config,
+        sample_memories,
     ):
         """Test that low confidence edges are filtered."""
         # Set high confidence threshold
@@ -234,9 +257,12 @@ class TestLLMRelationshipEngineSQLite:
         result = await engine.process_new_memory(sample_memories[0])
 
         # With min_confidence=0.9, edges should be filtered
+        assert result is not None
+        assert result.memory_id == sample_memories[0].id
+
         # Check actual edges created
         edge_count = await sqlite_graph_store.count_edges()
-        # Should have fewer edges due to filtering
+        # Should have fewer edges due to filtering (0.85 < 0.9)
         assert edge_count >= 0
 
 

@@ -5,9 +5,8 @@ Tests the unified memory engine integrating all components.
 """
 
 import pytest
-from datetime import datetime, timedelta
 
-from src.models.memory import Memory, MemoryStatus, NodeType
+from src.models.memory import Memory, MemoryStatus
 from src.services.memory_engine import MemoryEngine
 
 
@@ -211,7 +210,13 @@ class TestMemoryEngineSQLite:
         assert vector_retrieved is None
 
     async def test_search_similar_sqlite(
-        self, mock_llm, mock_embedder, sqlite_graph_store, mock_vector_store, config, sample_memories
+        self,
+        mock_llm,
+        mock_embedder,
+        sqlite_graph_store,
+        mock_vector_store,
+        config,
+        sample_memories,
     ):
         """Test semantic search."""
         engine = MemoryEngine(
@@ -238,7 +243,13 @@ class TestMemoryEngineSQLite:
         assert all(isinstance(r[1], float) for r in results)
 
     async def test_query_memories_sqlite(
-        self, mock_llm, mock_embedder, sqlite_graph_store, mock_vector_store, config, sample_memories
+        self,
+        mock_llm,
+        mock_embedder,
+        sqlite_graph_store,
+        mock_vector_store,
+        config,
+        sample_memories,
     ):
         """Test querying memories with filters."""
         engine = MemoryEngine(
@@ -265,7 +276,13 @@ class TestMemoryEngineSQLite:
         assert all(m.status == MemoryStatus.ACTIVE for m in results)
 
     async def test_get_neighbors_sqlite(
-        self, mock_llm, mock_embedder, sqlite_graph_store, mock_vector_store, config, sample_memories
+        self,
+        mock_llm,
+        mock_embedder,
+        sqlite_graph_store,
+        mock_vector_store,
+        config,
+        sample_memories,
     ):
         """Test getting memory neighbors."""
         engine = MemoryEngine(
@@ -300,7 +317,13 @@ class TestMemoryEngineSQLite:
             assert all(isinstance(n, tuple) for n in neighbors)
 
     async def test_find_path_sqlite(
-        self, mock_llm, mock_embedder, sqlite_graph_store, mock_vector_store, config, sample_memories
+        self,
+        mock_llm,
+        mock_embedder,
+        sqlite_graph_store,
+        mock_vector_store,
+        config,
+        sample_memories,
     ):
         """Test finding path between memories."""
         engine = MemoryEngine(
@@ -414,7 +437,13 @@ class TestMemoryEngineSQLite:
         assert retrieved.invalidation_reason == "Test invalidation"
 
     async def test_get_statistics_sqlite(
-        self, mock_llm, mock_embedder, sqlite_graph_store, mock_vector_store, config, sample_memories
+        self,
+        mock_llm,
+        mock_embedder,
+        sqlite_graph_store,
+        mock_vector_store,
+        config,
+        sample_memories,
     ):
         """Test getting engine statistics."""
         engine = MemoryEngine(

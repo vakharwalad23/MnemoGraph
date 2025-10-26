@@ -1,8 +1,14 @@
-"""Fixtures for service tests."""
+"""Fixtures for service tests.
 
-import asyncio
+All fixtures persist data across tests in the session and clean up only after
+all tests complete:
+- Qdrant: Session-scoped, deletes test collection after all tests
+- SQLite: Session-scoped, uses temp file, deleted after all tests
+- Neo4j: Session-scoped, deletes all Memory nodes after all tests
+"""
+
+from collections.abc import AsyncGenerator
 from datetime import datetime
-from typing import AsyncGenerator
 
 import pytest
 
@@ -11,116 +17,25 @@ from src.core.embeddings.ollama import OllamaEmbedder
 from src.core.graph_store.neo4j_store import Neo4jGraphStore
 from src.core.graph_store.sqlite_store import SQLiteGraphStore
 from src.core.llm.ollama import OllamaLLM
-from src.core.vector_store.base import SearchResult, VectorStore
+from src.core.vector_store.qdrant import QdrantStore
 from src.models.memory import Memory, MemoryStatus, NodeType
-
-
-# ═══════════════════════════════════════════════════════════
-# Mock Vector Store
-# ═══════════════════════════════════════════════════════════
-
-
-class MockVectorStore(VectorStore):
-    """Mock vector store for testing."""
-
-    def __init__(self):
-        self.memories: dict[str, Memory] = {}
-        self.initialized = False
-
-    async def initialize(self) -> None:
-        """Initialize store."""
-        self.initialized = True
-
-    async def upsert_memory(self, memory: Memory) -> None:
-        """Store memory."""
-        self.memories[memory.id] = memory
-
-    async def batch_upsert(self, memories: list[Memory]) -> None:
-        """Batch upsert."""
-        for memory in memories:
-            await self.upsert_memory(memory)
-
-    async def search_similar(
-        self,
-        vector: list[float],
-        limit: int = 10,
-        filters: dict = None,
-        score_threshold: float = None,
-    ) -> list[SearchResult]:
-        """Search for similar memories."""
-        results = []
-        for memory in self.memories.values():
-            # Simple cosine similarity
-            if memory.embedding:
-                similarity = sum(a * b for a, b in zip(vector, memory.embedding, strict=False)) / (
-                    sum(a * a for a in vector) ** 0.5
-                    * sum(b * b for b in memory.embedding) ** 0.5
-                    or 1
-                )
-            else:
-                similarity = 0.5
-
-            if score_threshold is None or similarity >= score_threshold:
-                # Apply filters
-                if filters:
-                    if "status" in filters and memory.status.value not in filters["status"]:
-                        continue
-                    if "created_after" in filters and memory.created_at.isoformat() < filters[
-                        "created_after"
-                    ]:
-                        continue
-
-                results.append(SearchResult(memory=memory, score=similarity))
-
-        # Sort by score and limit
-        results.sort(key=lambda x: x.score, reverse=True)
-        return results[:limit]
-
-    async def search_by_payload(self, filter: dict, limit: int = 10) -> list[SearchResult]:
-        """Search by payload."""
-        results = []
-        for memory in self.memories.values():
-            # Simple filter matching
-            results.append(SearchResult(memory=memory, score=1.0))
-            if len(results) >= limit:
-                break
-        return results
-
-    async def get_memory(self, memory_id: str) -> Memory | None:
-        """Get memory by ID."""
-        return self.memories.get(memory_id)
-
-    async def delete_memory(self, memory_id: str) -> None:
-        """Delete memory."""
-        self.memories.pop(memory_id, None)
-
-    async def count_memories(self, filters: dict = None) -> int:
-        """Count memories."""
-        return len(self.memories)
-
-    async def close(self) -> None:
-        """Close store."""
-        pass
-
 
 # ═══════════════════════════════════════════════════════════
 # Fixtures
 # ═══════════════════════════════════════════════════════════
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def ollama_llm() -> AsyncGenerator[OllamaLLM, None]:
     """
     Create real Ollama LLM provider for testing.
 
-    Requires Ollama to be running with llama3.1 model.
+    Requires Ollama to be running with llama3.1:8b model.
     Tests will skip if Ollama is not available.
+
+    Session-scoped: Shared across all tests for efficiency.
     """
-    llm = OllamaLLM(
-        host="http://localhost:11434",
-        model="llama3.1",
-        timeout=120.0
-    )
+    llm = OllamaLLM(host="http://localhost:11434", model="llama3.1:8b", timeout=120.0)
 
     try:
         # Test connection by making a simple request
@@ -132,18 +47,18 @@ async def ollama_llm() -> AsyncGenerator[OllamaLLM, None]:
         await llm.close()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def ollama_embedder() -> AsyncGenerator[OllamaEmbedder, None]:
     """
     Create real Ollama embedder for testing.
 
     Requires Ollama to be running with nomic-embed-text model.
     Tests will skip if Ollama is not available.
+
+    Session-scoped: Shared across all tests for efficiency.
     """
     embedder = OllamaEmbedder(
-        host="http://localhost:11434",
-        model="nomic-embed-text",
-        timeout=120.0
+        host="http://localhost:11434", model="nomic-embed-text", timeout=120.0
     )
 
     try:
@@ -156,27 +71,82 @@ async def ollama_embedder() -> AsyncGenerator[OllamaEmbedder, None]:
         await embedder.close()
 
 
-@pytest.fixture
-async def mock_vector_store() -> AsyncGenerator[MockVectorStore, None]:
-    """Create mock vector store."""
-    store = MockVectorStore()
-    await store.initialize()
-    yield store
-    await store.close()
+@pytest.fixture(scope="session")
+async def qdrant_vector_store() -> AsyncGenerator[QdrantStore, None]:
+    """
+    Create real Qdrant vector store for testing.
+
+    Requires Qdrant to be running on localhost:6333.
+    Tests will skip if Qdrant is not available.
+
+    Session-scoped: Data persists across all tests, cleaned up at end.
+    """
+    import uuid
+
+    # Use unique collection name for each test session
+    collection_name = f"test_memories_{uuid.uuid4().hex[:8]}"
+
+    store = QdrantStore(
+        host="localhost",
+        port=6333,
+        collection_name=collection_name,
+        vector_size=768,  # nomic-embed-text dimension
+        use_grpc=False,
+        use_quantization=False,
+    )
+
+    try:
+        await store.initialize()
+        yield store
+    except Exception as e:
+        pytest.skip(f"Qdrant not available: {e}")
+    finally:
+        # Clean up: delete test collection after ALL tests complete
+        try:
+            if store.client:
+                await store.client.delete_collection(collection_name)
+        except Exception:
+            pass
+        await store.close()
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def sqlite_graph_store() -> AsyncGenerator[SQLiteGraphStore, None]:
-    """Create SQLite graph store for testing."""
-    store = SQLiteGraphStore(db_path=":memory:")
-    await store.initialize()
-    yield store
-    await store.close()
+    """
+    Create SQLite graph store for testing.
+
+    Session-scoped: Data persists across all tests, cleaned up at end.
+    Uses temporary file that is deleted after all tests complete.
+    """
+    import os
+    import tempfile
+
+    # Create temporary database file
+    fd, db_path = tempfile.mkstemp(suffix=".db", prefix="test_mnemo_")
+    os.close(fd)  # Close file descriptor, SQLite will open it
+
+    store = SQLiteGraphStore(db_path=db_path)
+    try:
+        await store.initialize()
+        yield store
+    finally:
+        await store.close()
+        # Clean up: delete temp database file after ALL tests complete
+        try:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+        except Exception:
+            pass
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def neo4j_graph_store() -> AsyncGenerator[Neo4jGraphStore, None]:
-    """Create Neo4j graph store for testing (requires running Neo4j)."""
+    """
+    Create Neo4j graph store for testing (requires running Neo4j).
+
+    Session-scoped: Data persists across all tests, cleaned up at end.
+    Deletes all test data after ALL tests complete.
+    """
     store = Neo4jGraphStore(
         uri="bolt://localhost:7687",
         username="neo4j",
@@ -189,7 +159,14 @@ async def neo4j_graph_store() -> AsyncGenerator[Neo4jGraphStore, None]:
     except Exception as e:
         pytest.skip(f"Neo4j not available: {e}")
     finally:
-        # Clean up test data
+        # Clean up: Delete all test nodes and relationships after ALL tests complete
+        try:
+            if store.driver:
+                async with store.driver.session(database=store.database) as session:
+                    # Delete all Memory nodes and their relationships
+                    await session.run("MATCH (m:Memory) DETACH DELETE m")
+        except Exception:
+            pass
         await store.close()
 
 
@@ -200,7 +177,7 @@ def sample_memory() -> Memory:
         id="mem_test_1",
         content="This is a test memory about Python async programming",
         type=NodeType.MEMORY,
-        embedding=[0.1] * 16,
+        embedding=[0.1] * 768,  # nomic-embed-text dimension
         status=MemoryStatus.ACTIVE,
         created_at=datetime.now(),
         updated_at=datetime.now(),
@@ -215,7 +192,7 @@ def sample_memories() -> list[Memory]:
             id=f"mem_test_{i}",
             content=f"Test memory {i} about programming",
             type=NodeType.MEMORY,
-            embedding=[0.1 * i] * 16,
+            embedding=[0.1 * i] * 768,  # nomic-embed-text dimension
             status=MemoryStatus.ACTIVE,
             created_at=datetime.now(),
             updated_at=datetime.now(),
@@ -243,13 +220,19 @@ def config() -> Config:
 # ═══════════════════════════════════════════════════════════
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def mock_llm(ollama_llm):
     """Alias for ollama_llm to maintain test compatibility."""
     return ollama_llm
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def mock_embedder(ollama_embedder):
     """Alias for ollama_embedder to maintain test compatibility."""
     return ollama_embedder
+
+
+@pytest.fixture(scope="session")
+async def mock_vector_store(qdrant_vector_store):
+    """Alias for qdrant_vector_store to maintain test compatibility."""
+    return qdrant_vector_store
