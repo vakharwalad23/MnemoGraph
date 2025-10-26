@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.models.memory import Memory
+
 
 class RelationshipType(str, Enum):
     """Types of relationships between memories."""
@@ -63,17 +65,24 @@ class Edge(BaseModel):
         json_encoders = {datetime: lambda v: v.isoformat()}
 
 
-class RelationshipBundle(BaseModel):
-    """
-    Complete set of relationships extracted for a memory.
-    """
+class Relationship(BaseModel):
+    """Individual relationship between memories."""
 
-    memory_id: str
-    relationships: list[dict[str, Any]] = Field(default_factory=list)
-    derived_insights: list[dict[str, Any]] = Field(default_factory=list)
-    conflicts: list[dict[str, Any]] = Field(default_factory=list)
-    overall_analysis: str = ""
-    extraction_time_ms: float = 0.0
+    type: RelationshipType
+    target_id: str
+    confidence: float
+    reasoning: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class Conflict(BaseModel):
+    """Conflict between memories."""
+
+    target_id: str
+    conflict_type: str
+    resolution: str
+    reasoning: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class DerivedInsight(BaseModel):
@@ -88,17 +97,30 @@ class DerivedInsight(BaseModel):
     type: str  # pattern_recognition, summary, inference, abstraction
 
 
+class RelationshipBundle(BaseModel):
+    """
+    Complete set of relationships extracted for a memory.
+    """
+
+    memory_id: str
+    relationships: list[Relationship] = Field(default_factory=list)
+    derived_insights: list[DerivedInsight] = Field(default_factory=list)
+    conflicts: list[Conflict] = Field(default_factory=list)
+    overall_analysis: str = ""
+    extraction_time_ms: float = 0.0
+
+
 class ContextBundle(BaseModel):
     """
     Complete context gathered for relationship extraction.
     """
 
-    vector_candidates: list[Any] = Field(default_factory=list)  # Top vector matches
-    temporal_context: list[Any] = Field(default_factory=list)  # Recent memories
-    graph_context: list[Any] = Field(default_factory=list)  # Graph neighbors
-    entity_context: list[Any] = Field(default_factory=list)  # Shared entities
-    conversation_context: list[Any] = Field(default_factory=list)  # Thread context
-    filtered_candidates: list[Any] = Field(default_factory=list)  # Final filtered set
+    vector_candidates: list[Memory] = Field(default_factory=list)  # Top vector matches
+    temporal_context: list[Memory] = Field(default_factory=list)  # Recent memories
+    graph_context: list[Memory] = Field(default_factory=list)  # Graph neighbors
+    entity_context: list[Memory] = Field(default_factory=list)  # Shared entities
+    conversation_context: list[Memory] = Field(default_factory=list)  # Thread context
+    filtered_candidates: list[Memory] = Field(default_factory=list)  # Final filtered set
 
 
 class FilterStageResult(BaseModel):

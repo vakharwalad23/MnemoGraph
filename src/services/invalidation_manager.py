@@ -390,7 +390,7 @@ Respond with JSON:
 """
 
         result = await self.llm.complete(
-            prompt, response_format=LLMInvalidationCheck, temperature=0.0
+            prompt, response_format=InvalidationResult, temperature=0.0
         )
 
         return InvalidationResult(

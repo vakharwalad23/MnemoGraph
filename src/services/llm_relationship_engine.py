@@ -16,8 +16,8 @@ from src.models.relationships import (
     ContextBundle,
     DerivedInsight,
     Edge,
+    Relationship,
     RelationshipBundle,
-    RelationshipType,
 )
 from src.services.context_filter import MultiStageFilter
 from src.services.invalidation_manager import InvalidationManager
@@ -106,6 +106,7 @@ class LLMRelationshipEngine:
             extraction_task, upsert_task, node_task, return_exceptions=True
         )
 
+        print("Results:", results)
         extraction = results[0] if not isinstance(results[0], Exception) else None
 
         if not extraction:
@@ -128,7 +129,7 @@ class LLMRelationshipEngine:
         )
 
         for rel in extraction.relationships:
-            if rel.get("confidence", 0) >= min_confidence:
+            if rel.confidence >= min_confidence:
                 edge = self._create_edge_from_relationship(memory.id, rel)
                 edge_tasks.append(self.graph_store.add_edge(edge))
 
@@ -316,7 +317,7 @@ Begin extraction:
             lines.append(f"- [{mem.id}] {preview}")
         return "\n".join(lines)
 
-    def _create_edge_from_relationship(self, source_id: str, rel: RelationshipType) -> Edge:
+    def _create_edge_from_relationship(self, source_id: str, rel: Relationship) -> Edge:
         """
         Create edge dict from relationship.
 
@@ -329,12 +330,12 @@ Begin extraction:
         """
         return {
             "source": source_id,
-            "target": rel["target_id"],
-            "type": rel["type"],
+            "target": rel.target_id,
+            "type": rel.type,
             "metadata": {
-                "confidence": rel.get("confidence", 0.0),
-                "reasoning": rel.get("reasoning", ""),
-                **rel.get("metadata", {}),
+                "confidence": rel.confidence,
+                "reasoning": rel.reasoning,
+                **rel.metadata,
             },
         }
 
@@ -384,13 +385,13 @@ Begin extraction:
                 await self.vector_store.upsert_memory(derived)
 
                 # Create DERIVED_FROM edges
-                for source_id in insight["source_ids"]:
+                for source_id in insight.source_ids:
                     await self.graph_store.add_edge(
                         {
                             "source": derived.id,
                             "target": source_id,
                             "type": "DERIVED_FROM",
-                            "metadata": {"confidence": insight["confidence"]},
+                            "metadata": {"confidence": insight.confidence},
                         }
                     )
 
