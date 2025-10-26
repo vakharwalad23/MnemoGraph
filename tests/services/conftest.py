@@ -1,10 +1,7 @@
 """Fixtures for service tests.
 
-All fixtures persist data across tests in the session and clean up only after
-all tests complete:
-- Qdrant: Session-scoped, deletes test collection after all tests
-- SQLite: Session-scoped, uses temp file, deleted after all tests
-- Neo4j: Session-scoped, deletes all Memory nodes after all tests
+Fixtures use function scope to avoid event loop issues.
+Each test gets fresh instances but cleanup happens after all tests via pytest hooks.
 """
 
 from collections.abc import AsyncGenerator
@@ -25,15 +22,13 @@ from src.models.memory import Memory, MemoryStatus, NodeType
 # ═══════════════════════════════════════════════════════════
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def ollama_llm() -> AsyncGenerator[OllamaLLM, None]:
     """
     Create real Ollama LLM provider for testing.
 
     Requires Ollama to be running with llama3.1:8b model.
     Tests will skip if Ollama is not available.
-
-    Session-scoped: Shared across all tests for efficiency.
     """
     llm = OllamaLLM(host="http://localhost:11434", model="llama3.1:8b", timeout=120.0)
 
@@ -47,15 +42,13 @@ async def ollama_llm() -> AsyncGenerator[OllamaLLM, None]:
         await llm.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def ollama_embedder() -> AsyncGenerator[OllamaEmbedder, None]:
     """
     Create real Ollama embedder for testing.
 
     Requires Ollama to be running with nomic-embed-text model.
     Tests will skip if Ollama is not available.
-
-    Session-scoped: Shared across all tests for efficiency.
     """
     embedder = OllamaEmbedder(
         host="http://localhost:11434", model="nomic-embed-text", timeout=120.0
@@ -71,19 +64,18 @@ async def ollama_embedder() -> AsyncGenerator[OllamaEmbedder, None]:
         await embedder.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def qdrant_vector_store() -> AsyncGenerator[QdrantStore, None]:
     """
     Create real Qdrant vector store for testing.
 
     Requires Qdrant to be running on localhost:6333.
     Tests will skip if Qdrant is not available.
-
-    Session-scoped: Data persists across all tests, cleaned up at end.
+    Uses a test collection that gets cleaned up after test.
     """
     import uuid
 
-    # Use unique collection name for each test session
+    # Use unique collection name for each test
     collection_name = f"test_memories_{uuid.uuid4().hex[:8]}"
 
     store = QdrantStore(
@@ -101,7 +93,7 @@ async def qdrant_vector_store() -> AsyncGenerator[QdrantStore, None]:
     except Exception as e:
         pytest.skip(f"Qdrant not available: {e}")
     finally:
-        # Clean up: delete test collection after ALL tests complete
+        # Clean up: delete test collection
         try:
             if store.client:
                 await store.client.delete_collection(collection_name)
@@ -110,42 +102,25 @@ async def qdrant_vector_store() -> AsyncGenerator[QdrantStore, None]:
         await store.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def sqlite_graph_store() -> AsyncGenerator[SQLiteGraphStore, None]:
     """
     Create SQLite graph store for testing.
 
-    Session-scoped: Data persists across all tests, cleaned up at end.
-    Uses temporary file that is deleted after all tests complete.
+    Uses in-memory database for fast, isolated tests.
     """
-    import os
-    import tempfile
-
-    # Create temporary database file
-    fd, db_path = tempfile.mkstemp(suffix=".db", prefix="test_mnemo_")
-    os.close(fd)  # Close file descriptor, SQLite will open it
-
-    store = SQLiteGraphStore(db_path=db_path)
-    try:
-        await store.initialize()
-        yield store
-    finally:
-        await store.close()
-        # Clean up: delete temp database file after ALL tests complete
-        try:
-            if os.path.exists(db_path):
-                os.unlink(db_path)
-        except Exception:
-            pass
+    store = SQLiteGraphStore(db_path=":memory:")
+    await store.initialize()
+    yield store
+    await store.close()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def neo4j_graph_store() -> AsyncGenerator[Neo4jGraphStore, None]:
     """
     Create Neo4j graph store for testing (requires running Neo4j).
 
-    Session-scoped: Data persists across all tests, cleaned up at end.
-    Deletes all test data after ALL tests complete.
+    Cleans up test data after each test.
     """
     store = Neo4jGraphStore(
         uri="bolt://localhost:7687",
@@ -159,7 +134,7 @@ async def neo4j_graph_store() -> AsyncGenerator[Neo4jGraphStore, None]:
     except Exception as e:
         pytest.skip(f"Neo4j not available: {e}")
     finally:
-        # Clean up: Delete all test nodes and relationships after ALL tests complete
+        # Clean up: Delete all test nodes and relationships
         try:
             if store.driver:
                 async with store.driver.session(database=store.database) as session:
@@ -220,19 +195,19 @@ def config() -> Config:
 # ═══════════════════════════════════════════════════════════
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def mock_llm(ollama_llm):
     """Alias for ollama_llm to maintain test compatibility."""
     return ollama_llm
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def mock_embedder(ollama_embedder):
     """Alias for ollama_embedder to maintain test compatibility."""
     return ollama_embedder
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def mock_vector_store(qdrant_vector_store):
     """Alias for qdrant_vector_store to maintain test compatibility."""
     return qdrant_vector_store
