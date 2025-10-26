@@ -421,7 +421,10 @@ class Neo4jGraphStore(GraphStore):
         if depth > 1:
             pattern = pattern.replace("[r]", f"[r*1..{depth}]")
 
-        query = f"MATCH {pattern} WHERE m.id = $node_id RETURN n, r LIMIT {limit}"
+        # Include type(r) in the return to get the relationship type
+        query = (
+            f"MATCH {pattern} WHERE m.id = $node_id RETURN n, r, type(r) as rel_type LIMIT {limit}"
+        )
 
         async with self.driver.session(database=self.database) as session:
             result = await session.run(query, {"node_id": node_id})
@@ -430,17 +433,20 @@ class Neo4jGraphStore(GraphStore):
             async for record in result:
                 node = record["n"]
                 rel = record["r"]
+                rel_type = record["rel_type"]
 
                 # Handle both single relationship and path
                 if isinstance(rel, list):
-                    # Path with multiple relationships
+                    # Path with multiple relationships - use first relationship type
                     edge_info = Edge(
                         source=node_id,
                         target=node["id"],
-                        type=RelationshipType(record["r"]["type"]),
-                        confidence=record["r"].get("confidence", 1.0),
+                        type=RelationshipType(rel_type),
+                        confidence=rel[0].get("confidence", 1.0) if rel else 1.0,
                         created_at=datetime.fromisoformat(
-                            record["r"].get("created_at", datetime.now().isoformat())
+                            rel[0].get("created_at", datetime.now().isoformat())
+                            if rel
+                            else datetime.now().isoformat()
                         ),
                         metadata={},
                     )
@@ -449,12 +455,12 @@ class Neo4jGraphStore(GraphStore):
                     edge_info = Edge(
                         source=node_id,
                         target=node["id"],
-                        type=RelationshipType(record["r"]["type"]),
-                        confidence=record["r"].get("confidence", 1.0),
+                        type=RelationshipType(rel_type),
+                        confidence=rel.get("confidence", 1.0),
                         created_at=datetime.fromisoformat(
-                            record["r"].get("created_at", datetime.now().isoformat())
+                            rel.get("created_at", datetime.now().isoformat())
                         ),
-                        metadata=json.loads(record["r"].get("metadata", "{}")),
+                        metadata=json.loads(rel.get("metadata", "{}")),
                     )
 
                 neighbors.append((self._node_to_memory(node), edge_info))
