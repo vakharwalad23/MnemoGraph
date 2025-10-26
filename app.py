@@ -33,7 +33,8 @@ class AddMemoryRequest(BaseModel):
     """Request model for adding a memory."""
 
     text: str = Field(..., description="Memory text content")
-    metadata: dict[str, Any] | None = Field(default=None, description="Optional metadata")
+    metadata: dict[str, Any] | None = Field(
+        default=None, description="Optional metadata")
     memory_id: str | None = Field(default=None, description="Custom memory ID")
     auto_infer_relationships: bool | None = Field(
         default=None, description="Auto-infer relationships"
@@ -76,6 +77,18 @@ class UpdateMemoryRequest(BaseModel):
     text: str | None = None
     metadata: dict[str, Any] | None = None
     reindex_relationships: bool = False
+
+
+class UpdateMemoryResponse(BaseModel):
+    """Response model for update memory."""
+
+    id: str
+    version: int | None = None
+    action: str | None = None
+    change_description: str | None = None
+    previous_version: str | None = None
+    new_version: str | None = None
+    updated: bool = True
 
 
 class AddConversationMessage(BaseModel):
@@ -196,7 +209,7 @@ async def health_check():
         status="healthy" if engine else "initializing",
         engine_initialized=engine is not None,
         vector_store="Qdrant (http://localhost:6333)",
-        graph_store="SQLite (data/mnemograph.db)",
+        graph_store="Neo4j (bolt://localhost:7687)",
         embedding_model="nomic-embed-text (Ollama)",
     )
 
@@ -341,7 +354,7 @@ async def get_memory(memory_id: str, include_relationships: bool = Query(default
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@app.put("/memories/{memory_id}")
+@app.put("/memories/{memory_id}", response_model=UpdateMemoryResponse)
 async def update_memory(memory_id: str, request: UpdateMemoryRequest):
     """
     Update an existing memory.
@@ -357,15 +370,14 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
             # Update with versioning
             updated_memory, evolution = await engine.update_memory(memory_id, request.text)
 
-            return {
-                "id": updated_memory.id,
-                "version": updated_memory.version,
-                "action": evolution.action_taken,
-                "analysis": evolution.analysis,
-                "previous_version": (
-                    evolution.current_memory.id if evolution.current_memory else None
-                ),
-            }
+            return UpdateMemoryResponse(
+                id=updated_memory.id,
+                version=updated_memory.version,
+                action=evolution.action,
+                change_description=evolution.change.description if evolution.change else None,
+                previous_version=evolution.current_version,
+                new_version=evolution.new_version,
+            )
         else:
             # Just metadata update
             memory = await engine.get_memory(memory_id, validate=False)
@@ -374,9 +386,9 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
 
             if request.metadata:
                 memory.metadata.update(request.metadata)
-                await engine.graph_store.update_memory(memory)
+                await engine.graph_store.update_node(memory)
 
-            return {"id": memory.id, "updated": True}
+            return UpdateMemoryResponse(id=memory.id, updated=True)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
@@ -413,7 +425,8 @@ async def add_conversation(request: AddConversationRequest):
     the conversation order.
     Note: This endpoint is under development for the new architecture.
     """
-    raise HTTPException(status_code=501, detail="Conversation endpoints coming soon")
+    raise HTTPException(
+        status_code=501, detail="Conversation endpoints coming soon")
 
 
 # Document endpoints (Coming soon)
@@ -426,7 +439,8 @@ async def add_document(request: AddDocumentRequest):
     and infers semantic connections between chunks.
     Note: This endpoint is under development for the new architecture.
     """
-    raise HTTPException(status_code=501, detail="Document endpoints coming soon")
+    raise HTTPException(
+        status_code=501, detail="Document endpoints coming soon")
 
 
 # Statistics endpoint
@@ -464,4 +478,5 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run("app:app", host="0.0.0.0", port=8000,
+                reload=True, log_level="info")

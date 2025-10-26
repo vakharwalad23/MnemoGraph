@@ -59,9 +59,11 @@ class LLMRelationshipEngine:
         self.config = config
 
         # Initialize sub-systems
-        self.filter = MultiStageFilter(vector_store, graph_store, llm_provider, config)
+        self.filter = MultiStageFilter(
+            vector_store, graph_store, llm_provider, config)
 
-        self.invalidation = InvalidationManager(llm_provider, graph_store, vector_store)
+        self.invalidation = InvalidationManager(
+            llm_provider, graph_store, vector_store)
 
     async def process_new_memory(self, memory: Memory) -> RelationshipBundle:
         """
@@ -106,8 +108,8 @@ class LLMRelationshipEngine:
             extraction_task, upsert_task, node_task, return_exceptions=True
         )
 
-        print("Results:", results)
-        extraction = results[0] if not isinstance(results[0], Exception) else None
+        extraction = results[0] if not isinstance(
+            results[0], Exception) else None
 
         if not extraction:
             print("❌ LLM extraction failed")
@@ -121,11 +123,13 @@ class LLMRelationshipEngine:
             )
 
         # Step 4: Create edges in parallel
-        print(f"🔗 Creating {len(extraction.relationships)} relationship edges...")
+        print(
+            f"🔗 Creating {len(extraction.relationships)} relationship edges...")
         edge_tasks = []
 
         min_confidence = getattr(
-            getattr(self.config, "llm_relationships", None), "min_confidence", 0.5
+            getattr(self.config, "llm_relationships",
+                    None), "min_confidence", 0.5
         )
 
         for rel in extraction.relationships:
@@ -138,7 +142,8 @@ class LLMRelationshipEngine:
 
         # Step 5: Handle derived memories
         if extraction.derived_insights:
-            print(f"💡 Creating {len(extraction.derived_insights)} derived memories...")
+            print(
+                f"💡 Creating {len(extraction.derived_insights)} derived memories...")
             await self._create_derived_memories(extraction.derived_insights, memory)
 
         # Step 6: Event-driven invalidation check
@@ -191,39 +196,63 @@ Metadata: {memory.metadata}
 
 ## Task
 
-Extract ALL relevant relationships. For each relationship:
+Extract ALL relevant relationships. For each relationship, choose EXACTLY ONE type from the list below.
 
-### Relationship Types:
+IMPORTANT: Do NOT combine types with slashes (e.g., "REFERENCES/MENTIONS"). Use only the exact type names listed.
+
+### Valid Relationship Types:
 
 1. **SIMILAR_TO**: Semantically similar memories
-   - Strength: 0.0-1.0
-   - Aspect: what makes them similar
+   - Use when: Memories share similar topics, concepts, or themes
+   - Confidence: 0.7-1.0 for strong similarity, 0.5-0.7 for moderate
 
-2. **UPDATES/SUPERSEDES**: Memory updates/corrections
-   - What changed
-   - Should old version be preserved as historical context?
+2. **UPDATES**: One memory updates information in another
+   - Use when: New information modifies or corrects previous content
+   - Note the specific changes made
 
-3. **CONTRADICTS**: Conflicting information
-   - Nature of contradiction
-   - Are both valid in different contexts?
+3. **SUPERSEDES**: One memory completely replaces another
+   - Use when: New memory makes old one obsolete
+   - Consider if old version should be preserved as historical context
 
-4. **FOLLOWS/PRECEDES**: Temporal/causal sequences
-   - Why ordering matters
-   - Time gap significance
+4. **CONTRADICTS**: Conflicting information between memories
+   - Use when: Memories contain incompatible facts or statements
+   - Note if both could be valid in different contexts
 
-5. **PART_OF/BELONGS_TO**: Hierarchical containment
-   - Topic/category membership
-   - Abstraction levels
+5. **FOLLOWS**: Temporal or logical sequence (this comes after that)
+   - Use when: This memory follows another in time or causality
+   - Explain why ordering matters
 
-6. **REQUIRES/DEPENDS_ON**: Prerequisites
-   - Knowledge dependencies
+6. **PRECEDES**: Temporal or logical sequence (this comes before that)
+   - Use when: This memory comes before another in time or causality
+   - Note the time gap significance
 
-7. **REFERENCES/MENTIONS**: Direct references
-   - Context of mention
+7. **PART_OF**: Hierarchical containment (this is part of that)
+   - Use when: Memory belongs to a larger category or topic
+   - Specify the containment relationship
 
-8. **DERIVES_FROM**: Synthesized from other memories
-   - Source memories
-   - Synthesis reasoning
+8. **BELONGS_TO**: Category membership (this belongs to that group)
+   - Use when: Memory is a member of a broader category
+   - Identify the abstraction level
+
+9. **REQUIRES**: Prerequisite dependency (this needs that first)
+   - Use when: Understanding this memory requires knowledge from another
+   - Explain the dependency
+
+10. **DEPENDS_ON**: Depends on another memory for context
+    - Use when: This memory relies on context from another
+    - Clarify the dependency relationship
+
+11. **REFERENCES**: Direct reference or citation
+    - Use when: Memory explicitly references another memory
+    - Note the context of reference
+
+12. **MENTIONS**: Casual mention of related content
+    - Use when: Memory briefly mentions related information
+    - Describe how it's mentioned
+
+13. **DERIVED_FROM**: Synthesized or inferred from other memories
+    - Use when: This memory is a synthesis of multiple sources
+    - List all source memories
 
 ## Output Format
 
@@ -313,7 +342,8 @@ Begin extraction:
 
         lines = []
         for mem in memories:
-            preview = mem.content[:80] + "..." if len(mem.content) > 80 else mem.content
+            preview = mem.content[:80] + \
+                "..." if len(mem.content) > 80 else mem.content
             lines.append(f"- [{mem.id}] {preview}")
         return "\n".join(lines)
 
