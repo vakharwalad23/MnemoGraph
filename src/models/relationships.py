@@ -87,7 +87,6 @@ class Relationship(BaseModel):
         ...,
         description="REQUIRED: Explain why this relationship exists. Provide specific evidence from both memories.",
     )
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Conflict(BaseModel):
@@ -108,7 +107,6 @@ class Conflict(BaseModel):
         ...,
         description="REQUIRED: Explain the nature of the conflict and why this resolution approach is appropriate",
     )
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class DerivedInsight(BaseModel):
