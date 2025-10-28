@@ -358,7 +358,6 @@ Begin extraction:
             "metadata": {
                 "confidence": rel.confidence,
                 "reasoning": rel.reasoning,
-                **rel.metadata,
             },
         }
 

@@ -32,12 +32,8 @@ engine: MemoryEngine | None = None
 class AddMemoryRequest(BaseModel):
     """Request model for adding a memory."""
 
-    text: str = Field(..., description="Memory text content")
+    content: str = Field(..., description="Memory content")
     metadata: dict[str, Any] | None = Field(default=None, description="Optional metadata")
-    memory_id: str | None = Field(default=None, description="Custom memory ID")
-    auto_infer_relationships: bool | None = Field(
-        default=None, description="Auto-infer relationships"
-    )
 
 
 class AddMemoryResponse(BaseModel):
@@ -45,10 +41,12 @@ class AddMemoryResponse(BaseModel):
 
     memory_id: str
     created_at: str
-    text: str
+    content: str
     relationships_created: int
-    auto_infer_enabled: bool
-    engines_run: dict[str, Any] | None = None
+    derived_insights_created: int
+    conflicts_detected: int
+    extraction_time_ms: float
+    overall_analysis: str | None = None
 
 
 class QueryMemoriesRequest(BaseModel):
@@ -66,6 +64,13 @@ class MemoryResult(BaseModel):
 
     id: str
     score: float
+    content: str
+    type: str
+    status: str
+    version: int
+    created_at: str
+    updated_at: str
+    confidence: float
     metadata: dict[str, Any]
     relationships: dict[str, Any] | None = None
 
@@ -73,21 +78,21 @@ class MemoryResult(BaseModel):
 class UpdateMemoryRequest(BaseModel):
     """Request model for updating a memory."""
 
-    text: str | None = None
+    content: str | None = None
     metadata: dict[str, Any] | None = None
-    reindex_relationships: bool = False
 
 
 class UpdateMemoryResponse(BaseModel):
     """Response model for update memory."""
 
-    id: str
-    version: int | None = None
-    action: str | None = None
-    change_description: str | None = None
-    previous_version: str | None = None
-    new_version: str | None = None
-    updated: bool = True
+    memory_id: str
+    version: int
+    action: str  # "update", "augment", "replace", or "preserve"
+    change_description: str
+    reasoning: str
+    previous_version_id: str | None = None
+    new_version_id: str | None = None
+    confidence: float
 
 
 class AddConversationMessage(BaseModel):
@@ -220,29 +225,31 @@ async def add_memory(request: AddMemoryRequest):
     Add a new memory with automatic relationship inference.
 
     The memory will be embedded and stored in both vector and graph databases.
-    Relationships will be automatically inferred based on semantic similarity,
-    temporal proximity, entity co-occurrence, and causal patterns.
+    Relationships are automatically inferred using LLM-based analysis including:
+    - Semantic similarity
+    - Temporal relationships (updates, follows, precedes)
+    - Hierarchical relationships (part_of, belongs_to)
+    - Logical relationships (contradicts, requires, depends_on)
+    - Derived insights from patterns across memories
     """
     if not engine:
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
         memory, extraction = await engine.add_memory(
-            content=request.text,
+            content=request.content,
             metadata=request.metadata or {},
         )
 
         return AddMemoryResponse(
             memory_id=memory.id,
             created_at=memory.created_at.isoformat(),
-            text=memory.content,
+            content=memory.content,
             relationships_created=len(extraction.relationships),
-            auto_infer_enabled=True,
-            engines_run={
-                "relationships": len(extraction.relationships),
-                "derived_insights": len(extraction.derived_insights),
-                "conflicts": len(extraction.conflicts),
-            },
+            derived_insights_created=len(extraction.derived_insights),
+            conflicts_detected=len(extraction.conflicts),
+            extraction_time_ms=extraction.extraction_time_ms,
+            overall_analysis=extraction.overall_analysis if extraction.overall_analysis else None,
         )
     except Exception as e:
         logger.error(f"Error adding memory: {e}")
@@ -254,8 +261,9 @@ async def query_memories(request: QueryMemoriesRequest):
     """
     Search memories using semantic similarity.
 
-    Performs vector-based similarity search to find memories most relevant
-    to the query. Optionally includes relationship information.
+    Performs vector-based similarity search using embeddings to find memories
+    most relevant to the query. Optionally includes relationship information
+    showing how memories are connected in the knowledge graph.
     """
     if not engine:
         raise HTTPException(status_code=503, detail="Engine not initialized")
@@ -273,13 +281,14 @@ async def query_memories(request: QueryMemoriesRequest):
             result_data = {
                 "id": memory.id,
                 "score": score,
-                "metadata": {
-                    "content": memory.content,
-                    "type": memory.type.value,
-                    "status": memory.status.value,
-                    "created_at": memory.created_at.isoformat(),
-                    **memory.metadata,
-                },
+                "content": memory.content,
+                "type": memory.type.value,
+                "status": memory.status.value,
+                "version": memory.version,
+                "created_at": memory.created_at.isoformat(),
+                "updated_at": memory.updated_at.isoformat(),
+                "confidence": memory.confidence,
+                "metadata": memory.metadata,
             }
 
             # Include relationships if requested
@@ -289,11 +298,12 @@ async def query_memories(request: QueryMemoriesRequest):
                     "count": len(neighbors),
                     "edges": [
                         {
-                            "target_id": n[0].id,
-                            "type": n[1].type.value,
-                            "confidence": n[1].confidence,
+                            "target_id": edge.target,
+                            "type": edge.type.value,
+                            "confidence": edge.confidence,
+                            "metadata": edge.metadata,
                         }
-                        for n in neighbors
+                        for _, edge in neighbors
                     ],
                 }
 
@@ -310,7 +320,9 @@ async def get_memory(memory_id: str, include_relationships: bool = Query(default
     """
     Retrieve a specific memory by ID.
 
+    Returns the memory with its full content, metadata, and version information.
     Optionally includes relationship information showing connected memories.
+    Access tracking is automatically updated (access_count, last_accessed).
     """
     if not engine:
         raise HTTPException(status_code=503, detail="Engine not initialized")
@@ -329,21 +341,26 @@ async def get_memory(memory_id: str, include_relationships: bool = Query(default
             "version": memory.version,
             "created_at": memory.created_at.isoformat(),
             "updated_at": memory.updated_at.isoformat(),
-            "metadata": memory.metadata,
+            "last_accessed": memory.last_accessed.isoformat() if memory.last_accessed else None,
+            "access_count": memory.access_count,
             "confidence": memory.confidence,
+            "metadata": memory.metadata,
         }
 
         if include_relationships:
-            neighbors = await engine.get_neighbors(memory.id, limit=20)
-            result["relationships"] = [
-                {
-                    "target_id": n[0].id,
-                    "target_content": n[0].content[:100],
-                    "type": n[1].type.value,
-                    "confidence": n[1].confidence,
-                }
-                for n in neighbors
-            ]
+            neighbors = await engine.get_neighbors(memory_id, limit=20)
+            result["relationships"] = {
+                "count": len(neighbors),
+                "edges": [
+                    {
+                        "target_id": edge.target,
+                        "type": edge.type.value,
+                        "confidence": edge.confidence,
+                        "reasoning": edge.metadata.get("reasoning", ""),
+                    }
+                    for _, edge in neighbors
+                ],
+            }
 
         return result
     except HTTPException:
@@ -356,26 +373,33 @@ async def get_memory(memory_id: str, include_relationships: bool = Query(default
 @app.put("/memories/{memory_id}", response_model=UpdateMemoryResponse)
 async def update_memory(memory_id: str, request: UpdateMemoryRequest):
     """
-    Update an existing memory.
+    Update an existing memory with intelligent versioning.
 
-    Can update text content, metadata, or both. Optionally triggers
-    relationship reindexing.
+    The LLM analyzes the update and determines the appropriate action:
+    - "update": Creates new version, marks old as superseded
+    - "augment": Adds information without creating new version
+    - "replace": Completely replaces the memory
+    - "preserve": Keeps both as separate memories (for conflicts)
+
+    Optionally triggers relationship reindexing for the new/updated memory.
     """
     if not engine:
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        if request.text:
-            # Update with versioning
-            updated_memory, evolution = await engine.update_memory(memory_id, request.text)
+        if request.content:
+            # Update with LLM-guided versioning
+            updated_memory, evolution = await engine.update_memory(memory_id, request.content)
 
             return UpdateMemoryResponse(
-                id=updated_memory.id,
+                memory_id=updated_memory.id,
                 version=updated_memory.version,
                 action=evolution.action,
-                change_description=evolution.change.description if evolution.change else None,
-                previous_version=evolution.current_version,
-                new_version=evolution.new_version,
+                change_description=evolution.change.description if evolution.change else "",
+                reasoning=evolution.change.reasoning if evolution.change else "",
+                previous_version_id=evolution.current_version,
+                new_version_id=evolution.new_version,
+                confidence=evolution.change.change_type if evolution.change else 1.0,
             )
         else:
             # Just metadata update
@@ -387,7 +411,14 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
                 memory.metadata.update(request.metadata)
                 await engine.graph_store.update_node(memory)
 
-            return UpdateMemoryResponse(id=memory.id, updated=True)
+            return UpdateMemoryResponse(
+                memory_id=memory.id,
+                version=memory.version,
+                action="metadata_update",
+                change_description="Metadata updated",
+                reasoning="User requested metadata-only update",
+                confidence=1.0,
+            )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
