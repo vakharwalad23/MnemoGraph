@@ -122,7 +122,6 @@ class TestLLMRelationshipEngineUnit:
             target_id="mem_target",
             confidence=0.85,
             reasoning="Similar content",
-            metadata={"aspect": "technical"},
         )
 
         edge = engine._create_edge_from_relationship("mem_source", rel)
