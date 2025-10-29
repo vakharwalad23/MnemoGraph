@@ -113,3 +113,132 @@ class TestMemoryEvolutionServiceNeo4j:
 
             assert rolled_back is not None
             assert rolled_back.content == sample_memory.content
+
+    async def test_time_travel_query_neo4j(
+        self, mock_llm, neo4j_graph_store, mock_embedder, sample_memories
+    ):
+        """Test time travel query with Neo4j (temporal-only mode)."""
+        from datetime import datetime, timedelta
+
+        service = MemoryEvolutionService(
+            llm=mock_llm,
+            graph_store=neo4j_graph_store,
+            embedder=mock_embedder,
+        )
+
+        # Add memories with different time ranges
+        now = datetime.now()
+        for i, memory in enumerate(sample_memories[:3]):
+            # Set temporal validity
+            memory.valid_from = now - timedelta(days=10 - i)
+            memory.valid_until = None if i == 2 else now - timedelta(days=5 - i)
+            await neo4j_graph_store.add_node(memory)
+
+        # Query at a specific time (7 days ago) - temporal only
+        as_of = now - timedelta(days=7)
+        results = await service.time_travel_query(
+            query_embedding=None,  # No semantic search
+            as_of=as_of,
+            limit=10,
+            use_semantic_search=False,
+        )
+
+        assert isinstance(results, list)
+        # Should only return memories that were valid at that time
+        for memory in results:
+            assert memory.valid_from <= as_of
+            assert memory.valid_until is None or memory.valid_until > as_of
+
+    async def test_time_travel_query_with_semantic_search(
+        self, mock_llm, neo4j_graph_store, mock_embedder, mock_vector_store, sample_memories
+    ):
+        """Test time travel query with semantic search enabled."""
+        from datetime import datetime, timedelta
+
+        service = MemoryEvolutionService(
+            llm=mock_llm,
+            graph_store=neo4j_graph_store,
+            embedder=mock_embedder,
+            vector_store=mock_vector_store,
+        )
+
+        # Add memories with different time ranges
+        now = datetime.now()
+        for i, memory in enumerate(sample_memories[:3]):
+            # Set temporal validity
+            memory.valid_from = now - timedelta(days=10 - i)
+            memory.valid_until = None if i == 2 else now - timedelta(days=5 - i)
+            await neo4j_graph_store.add_node(memory)
+            await mock_vector_store.upsert_memory(memory)
+
+        # Query at a specific time with semantic search
+        as_of = now - timedelta(days=7)
+        query_embedding = [0.1] * 768
+        results = await service.time_travel_query(
+            query_embedding=query_embedding,
+            as_of=as_of,
+            limit=10,
+            use_semantic_search=True,
+        )
+
+        assert isinstance(results, list)
+        # Should return semantically similar memories valid at that time
+        for memory in results:
+            assert memory.valid_from <= as_of
+            assert memory.valid_until is None or memory.valid_until > as_of
+
+    async def test_time_travel_query_fallback_without_vector_store(
+        self, mock_llm, neo4j_graph_store, mock_embedder, sample_memories
+    ):
+        """Test time travel query falls back to temporal-only when vector_store is None."""
+        from datetime import datetime, timedelta
+
+        service = MemoryEvolutionService(
+            llm=mock_llm,
+            graph_store=neo4j_graph_store,
+            embedder=mock_embedder,
+            vector_store=None,  # No vector store
+        )
+
+        # Add memories
+        now = datetime.now()
+        for i, memory in enumerate(sample_memories[:3]):
+            memory.valid_from = now - timedelta(days=10 - i)
+            memory.valid_until = None if i == 2 else now - timedelta(days=5 - i)
+            await neo4j_graph_store.add_node(memory)
+
+        # Try semantic search but should fallback to temporal-only
+        as_of = now - timedelta(days=7)
+        results = await service.time_travel_query(
+            query_embedding=[0.1] * 768,
+            as_of=as_of,
+            limit=10,
+            use_semantic_search=True,  # Requested but will fallback
+        )
+
+        assert isinstance(results, list)
+        # Should still work with temporal filtering
+        for memory in results:
+            assert memory.valid_from <= as_of
+            assert memory.valid_until is None or memory.valid_until > as_of
+
+    async def test_get_current_version_neo4j(
+        self, mock_llm, neo4j_graph_store, mock_embedder, sample_memory
+    ):
+        """Test getting current version with Neo4j."""
+        service = MemoryEvolutionService(
+            llm=mock_llm,
+            graph_store=neo4j_graph_store,
+            embedder=mock_embedder,
+        )
+
+        await neo4j_graph_store.add_node(sample_memory)
+
+        # Create multiple versions
+        result1 = await service.evolve_memory(sample_memory, "Version 2")
+
+        if result1.new_version:
+            # Get current should return the latest version
+            current = await service.get_current_version(sample_memory.id)
+            assert current is not None
+            assert current.id == result1.new_version

@@ -66,6 +66,7 @@ class MemoryEngine:
             llm=llm,
             graph_store=graph_store,
             embedder=embedder,
+            vector_store=vector_store,
         )
 
         self.invalidation = InvalidationManager(
