@@ -1,10 +1,10 @@
 """
-Unified Memory Engine - Integrates all Phase 1-3 components.
+Unified Memory Engine - Integrates all components.
 
 Brings together:
-- Phase 1: LLM & Embedder providers
-- Phase 2: Memory Evolution & Invalidation
-- Phase 3: Scalable Relationship Extraction
+- LLM & Embedder providers
+- Memory Evolution & Invalidation
+- Scalable Relationship Extraction
 - Graph Store & Vector Store
 """
 
