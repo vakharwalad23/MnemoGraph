@@ -66,7 +66,7 @@ MnemoGraph uses LLMs to extract 13 types of relationships in a single inference:
          │                       │
 ┌────────▼────────┐    ┌────────▼────────┐
 │  Vector Store   │    │   Graph Store    │
-│   (Qdrant)      │    │ (SQLite/Neo4j)   │
+│   (Qdrant)      │    │    (Neo4j)       │
 │                 │    │                  │
 │ • Embeddings    │    │ • Nodes          │
 │ • HNSW Search   │    │ • Relationships  │
@@ -347,9 +347,6 @@ pytest tests/test_invalidation_manager.py -v
 # Context filter tests
 pytest tests/test_context_filter.py -v
 
-# SQLite graph store tests
-pytest tests/ -v -m sqlite
-
 # Neo4j graph store tests (requires Neo4j running)
 pytest tests/ -v -m neo4j
 ```
@@ -363,7 +360,7 @@ pytest tests/ -v -m neo4j
 - Memory evolution (update, augment, replace, preserve)
 - Semantic invalidation (on-demand, proactive, event-driven)
 - Vector store (Qdrant integration)
-- Graph stores (SQLite & Neo4j)
+- Graph store (Neo4j)
 - LLM providers (Ollama & OpenAI)
 - Embedders (Ollama & OpenAI)
 
@@ -491,7 +488,7 @@ qdrant=QdrantConfig(
 
 - **LLM**: [Ollama](https://ollama.ai/) (local) or [OpenAI](https://openai.com/) (cloud)
 - **Vector Store**: [Qdrant](https://qdrant.tech/) - High-performance vector similarity search with HNSW indexing
-- **Graph Store**: SQLite (default) or [Neo4j](https://neo4j.com/) - Relationship storage and traversal
+- **Graph Store**: [Neo4j](https://neo4j.com/) - Relationship storage and traversal
 - **Embeddings**: [Ollama](https://ollama.ai/) (nomic-embed-text) or [OpenAI](https://openai.com/) (text-embedding-3-small)
 - **API Framework**: [FastAPI](https://fastapi.tiangolo.com/) - Modern, fast web framework
 - **Testing**: [pytest](https://pytest.org/) - Comprehensive test suite with 97% pass rate
@@ -584,7 +581,6 @@ This is a **PoC V2** with known areas for improvement:
 
 #### Scalability
 
-- **Graph queries**: SQLite graph traversal is slower than Neo4j (use Neo4j for large graphs)
 - **Vector quantization**: int8 quantization trades accuracy for storage (configurable)
 - **Background validation**: Worker may need tuning for millions of memories
 
@@ -630,7 +626,7 @@ MIT License - see LICENSE file for details
 - Inspired by cognitive science research on human memory systems
 - Built with modern LLM infrastructure (Ollama, OpenAI)
 - Vector search powered by Qdrant's HNSW implementation
-- Graph storage leveraging SQLite and Neo4j
+- Graph storage using Neo4j
 - Thanks to the open-source AI/ML community
 
 ### Key Insights

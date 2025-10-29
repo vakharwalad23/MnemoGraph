@@ -5,7 +5,6 @@ Factory for creating graph store backends.
 from src.config import Config
 from src.core.graph_store.base import GraphStore
 from src.core.graph_store.neo4j_store import Neo4jGraphStore
-from src.core.graph_store.sqlite_store import SQLiteGraphStore
 
 
 class GraphStoreFactory:
@@ -32,7 +31,5 @@ class GraphStoreFactory:
                 password=config.neo4j.password,
                 database=config.neo4j.database,
             )
-        elif config.graph_backend == "sqlite":
-            return SQLiteGraphStore(db_path=config.sqlite.db_path)
         else:
             raise ValueError(f"Unsupported graph backend: {config.graph_backend}")

@@ -85,12 +85,6 @@ class Neo4jConfig(BaseModel):
     database: str = "neo4j"
 
 
-class SQLiteConfig(BaseModel):
-    """SQLite graph database configuration."""
-
-    db_path: str = "data/mnemo_graph.db"
-
-
 class Config(BaseModel):
     """Main configuration."""
 
@@ -100,10 +94,9 @@ class Config(BaseModel):
     memory_evolution: MemoryEvolutionConfig = Field(default_factory=MemoryEvolutionConfig)
     qdrant: QdrantConfig = Field(default_factory=QdrantConfig)
     neo4j: Neo4jConfig = Field(default_factory=Neo4jConfig)
-    sqlite: SQLiteConfig = Field(default_factory=SQLiteConfig)
 
     # Graph store backend
-    graph_backend: str = "sqlite"  # sqlite, neo4j
+    graph_backend: str = "neo4j"
 
     # Debug and logging
     debug: bool = False
@@ -131,7 +124,7 @@ class Config(BaseModel):
             MNEMO_EMBEDDER_MODEL: Embedder model name
             MNEMO_EMBEDDER_API_KEY: Embedder API key (for OpenAI)
             MNEMO_EMBEDDER_DIMENSION: Embedding dimension (optional)
-            MNEMO_GRAPH_BACKEND: Graph backend (sqlite, neo4j)
+            MNEMO_GRAPH_BACKEND: Graph backend (neo4j)
             MNEMO_NEO4J_URI: Neo4j URI
             MNEMO_NEO4J_USERNAME: Neo4j username
             MNEMO_NEO4J_PASSWORD: Neo4j password
@@ -180,15 +173,12 @@ class Config(BaseModel):
                 timeout=get_env("MNEMO_EMBEDDER_TIMEOUT", 120.0),
                 dimension=get_env("MNEMO_EMBEDDER_DIMENSION"),
             ),
-            graph_backend=get_env("MNEMO_GRAPH_BACKEND", "sqlite"),
+            graph_backend=get_env("MNEMO_GRAPH_BACKEND", "neo4j"),
             neo4j=Neo4jConfig(
                 uri=get_env("MNEMO_NEO4J_URI", "bolt://localhost:7687"),
                 username=get_env("MNEMO_NEO4J_USERNAME", "neo4j"),
                 password=get_env("MNEMO_NEO4J_PASSWORD", "password"),
                 database=get_env("MNEMO_NEO4J_DATABASE", "neo4j"),
-            ),
-            sqlite=SQLiteConfig(
-                db_path=get_env("MNEMO_SQLITE_DB_PATH", "data/mnemo_graph.db"),
             ),
             qdrant=QdrantConfig(
                 url=get_env("MNEMO_QDRANT_URL", "http://localhost:6333"),

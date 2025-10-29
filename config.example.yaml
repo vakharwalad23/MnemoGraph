@@ -18,16 +18,13 @@ embedder:
   timeout: 120.0
   dimension: null # Auto-detected if not set
 
-graph_backend: sqlite # sqlite or neo4j
+graph_backend: neo4j # neo4j only
 
 neo4j:
   uri: bolt://localhost:7687
   username: neo4j
   password: password
   database: neo4j
-
-sqlite:
-  db_path: data/mnemo_graph.db
 
 qdrant:
   url: http://localhost:6333

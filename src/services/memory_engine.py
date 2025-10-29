@@ -51,7 +51,7 @@ class MemoryEngine:
         Args:
             llm: LLM provider for text generation
             embedder: Embedder for generating embeddings
-            graph_store: Graph database (SQLite or Neo4j)
+            graph_store: Graph database (Neo4j)
             vector_store: Vector database (Qdrant)
             config: Configuration object
         """

@@ -36,7 +36,7 @@ class TestConfigDefaults:
         assert config.embedder.dimension is None  # Auto-detect
 
         # Graph backend
-        assert config.graph_backend == "sqlite"
+        assert config.graph_backend == "neo4j"
 
         # Neo4j defaults
         assert config.neo4j.uri == "bolt://localhost:7687"
@@ -181,7 +181,7 @@ MNEMO_GRAPH_BACKEND=neo4j
         # Should still have defaults
         assert config.llm.model == "llama3.1:8b"
         assert config.embedder.provider == "ollama"
-        assert config.graph_backend == "sqlite"
+        assert config.graph_backend == "neo4j"
 
 
 class TestConfigFromYAML:
@@ -274,7 +274,7 @@ class TestConfigFromYAML:
         yaml_file = tmp_path / "config.yaml"
         config_data = {
             "llm": {"model": "llama3.2:latest"},
-            "graph_backend": "sqlite",
+            "graph_backend": "neo4j",
         }
         yaml_file.write_text(yaml.dump(config_data))
 
@@ -283,7 +283,7 @@ class TestConfigFromYAML:
         # Should merge with defaults
         assert config.llm.model == "llama3.2:latest"
         assert config.llm.provider == "ollama"  # default
-        assert config.graph_backend == "sqlite"
+        assert config.graph_backend == "neo4j"
         assert config.embedder.model == "nomic-embed-text"  # default
 
     def test_from_yaml_qdrant_advanced_config(self, tmp_path):
@@ -336,6 +336,7 @@ class TestConfigFromYAML:
 class TestConfigFromEnvOrYAML:
     """Test combined loading (env overrides YAML)."""
 
+    # @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
     def test_env_overrides_yaml(self, tmp_path, monkeypatch):
         """Test that environment variables override YAML values."""
         # Clear all existing MNEMO_ env vars
@@ -351,7 +352,7 @@ class TestConfigFromEnvOrYAML:
                 "model": "llama3.1:8b",
                 "temperature": 0.0,
             },
-            "graph_backend": "sqlite",
+            "graph_backend": "neo4j",
         }
         yaml_file.write_text(yaml.dump(config_data))
 

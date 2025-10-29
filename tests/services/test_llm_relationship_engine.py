@@ -17,21 +17,21 @@ class TestLLMRelationshipEngineUnit:
     """Unit tests for LLMRelationshipEngine."""
 
     async def test_initialization(
-        self, mock_llm, mock_embedder, mock_vector_store, sqlite_graph_store, config
+        self, mock_llm, mock_embedder, mock_vector_store, neo4j_graph_store, config
     ):
         """Test engine initialization."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             config=config,
         )
 
         assert engine.llm == mock_llm
         assert engine.embedder == mock_embedder
         assert engine.vector_store == mock_vector_store
-        assert engine.graph_store == sqlite_graph_store
+        assert engine.graph_store == neo4j_graph_store
         assert engine.config == config
 
     async def test_format_memories_detailed(
@@ -39,7 +39,7 @@ class TestLLMRelationshipEngineUnit:
         mock_llm,
         mock_embedder,
         mock_vector_store,
-        sqlite_graph_store,
+        neo4j_graph_store,
         config,
         sample_memories,
     ):
@@ -48,7 +48,7 @@ class TestLLMRelationshipEngineUnit:
             llm_provider=mock_llm,
             embedder=mock_embedder,
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             config=config,
         )
 
@@ -65,7 +65,7 @@ class TestLLMRelationshipEngineUnit:
         mock_llm,
         mock_embedder,
         mock_vector_store,
-        sqlite_graph_store,
+        neo4j_graph_store,
         config,
         sample_memories,
     ):
@@ -74,7 +74,7 @@ class TestLLMRelationshipEngineUnit:
             llm_provider=mock_llm,
             embedder=mock_embedder,
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             config=config,
         )
 
@@ -87,14 +87,14 @@ class TestLLMRelationshipEngineUnit:
         assert len(formatted) < len(detailed)
 
     async def test_format_memories_empty(
-        self, mock_llm, mock_embedder, mock_vector_store, sqlite_graph_store, config
+        self, mock_llm, mock_embedder, mock_vector_store, neo4j_graph_store, config
     ):
         """Test formatting empty memory list."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             config=config,
         )
 
@@ -104,14 +104,14 @@ class TestLLMRelationshipEngineUnit:
         assert "No memories" in formatted
 
     async def test_create_edge_from_relationship(
-        self, mock_llm, mock_embedder, mock_vector_store, sqlite_graph_store, config
+        self, mock_llm, mock_embedder, mock_vector_store, neo4j_graph_store, config
     ):
         """Test creating edge from relationship."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             config=config,
         )
 
@@ -131,138 +131,6 @@ class TestLLMRelationshipEngineUnit:
         assert edge["type"] == RelationshipType.SIMILAR_TO
         assert edge["metadata"]["confidence"] == 0.85
         assert edge["metadata"]["reasoning"] == "Similar content"
-
-
-@pytest.mark.unit
-@pytest.mark.sqlite
-@pytest.mark.asyncio
-class TestLLMRelationshipEngineSQLite:
-    """Integration tests with SQLite."""
-
-    async def test_process_new_memory_sqlite(
-        self, mock_llm, mock_embedder, mock_vector_store, sqlite_graph_store, config, sample_memory
-    ):
-        """Test processing new memory with SQLite."""
-        engine = LLMRelationshipEngine(
-            llm_provider=mock_llm,
-            embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
-            config=config,
-        )
-
-        # Process memory
-        result = await engine.process_new_memory(sample_memory)
-
-        assert result is not None
-        assert hasattr(result, "memory_id")
-        assert hasattr(result, "relationships")
-        assert hasattr(result, "derived_insights")
-        assert hasattr(result, "extraction_time_ms")
-        assert result.memory_id == sample_memory.id
-
-    async def test_process_memory_with_context_sqlite(
-        self,
-        mock_llm,
-        mock_embedder,
-        mock_vector_store,
-        sqlite_graph_store,
-        config,
-        sample_memories,
-    ):
-        """Test processing with existing context."""
-        engine = LLMRelationshipEngine(
-            llm_provider=mock_llm,
-            embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
-            config=config,
-        )
-
-        # Add existing memories
-        for mem in sample_memories[:-1]:
-            await sqlite_graph_store.add_node(mem)
-            await mock_vector_store.upsert_memory(mem)
-
-        # Process new memory
-        new_memory = sample_memories[-1]
-        result = await engine.process_new_memory(new_memory)
-
-        assert result is not None
-        # With real LLM, processing happens
-        # (No call_count check since we're using real Ollama)
-
-    async def test_create_derived_memories_sqlite(
-        self, mock_llm, mock_embedder, mock_vector_store, sqlite_graph_store, config, sample_memory
-    ):
-        """Test creating derived memories."""
-        engine = LLMRelationshipEngine(
-            llm_provider=mock_llm,
-            embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
-            config=config,
-        )
-
-        # Add source memory
-        await sqlite_graph_store.add_node(sample_memory)
-
-        from src.models.relationships import DerivedInsight
-
-        insights = [
-            DerivedInsight(
-                content="User is learning async programming",
-                confidence=0.8,
-                reasoning="Pattern in recent queries",
-                source_ids=[sample_memory.id],
-                type="pattern_recognition",
-            )
-        ]
-
-        # Create derived memories
-        await engine._create_derived_memories(insights, sample_memory)
-
-        # Check if derived memory was created
-        count = await sqlite_graph_store.count_nodes({"type": NodeType.DERIVED.value})
-        assert count > 0
-
-    async def test_edge_creation_with_confidence_filter_sqlite(
-        self,
-        mock_llm,
-        mock_embedder,
-        mock_vector_store,
-        sqlite_graph_store,
-        config,
-        sample_memories,
-    ):
-        """Test that low confidence edges are filtered."""
-        # Set high confidence threshold
-        config.llm_relationships.min_confidence = 0.9
-
-        engine = LLMRelationshipEngine(
-            llm_provider=mock_llm,
-            embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
-            config=config,
-        )
-
-        # Add memories
-        for mem in sample_memories[:2]:
-            await sqlite_graph_store.add_node(mem)
-            await mock_vector_store.upsert_memory(mem)
-
-        # Process (mock returns 0.85 confidence)
-        result = await engine.process_new_memory(sample_memories[0])
-
-        # With min_confidence=0.9, edges should be filtered
-        assert result is not None
-        assert result.memory_id == sample_memories[0].id
-
-        # Check actual edges created
-        edge_count = await sqlite_graph_store.count_edges()
-        # Should have fewer edges due to filtering (0.85 < 0.9)
-        assert edge_count >= 0
 
 
 @pytest.mark.integration
@@ -360,14 +228,14 @@ class TestBuildExtractionPrompt:
     """Tests for prompt building."""
 
     async def test_build_extraction_prompt(
-        self, mock_llm, mock_embedder, mock_vector_store, sqlite_graph_store, config, sample_memory
+        self, mock_llm, mock_embedder, mock_vector_store, neo4j_graph_store, config, sample_memory
     ):
         """Test extraction prompt building."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             config=config,
         )
 

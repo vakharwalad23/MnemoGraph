@@ -129,21 +129,6 @@ async def qdrant_vector_store() -> AsyncGenerator:
 
 
 @pytest.fixture
-async def sqlite_graph_store() -> AsyncGenerator:
-    """
-    Create SQLite graph store for testing.
-
-    Uses in-memory database for fast, isolated tests.
-    """
-    from src.core.graph_store.sqlite_store import SQLiteGraphStore
-
-    store = SQLiteGraphStore(db_path=":memory:")
-    await store.initialize()
-    yield store
-    await store.close()
-
-
-@pytest.fixture
 async def neo4j_graph_store() -> AsyncGenerator:
     """
     Create Neo4j graph store for testing (requires running Neo4j).

@@ -305,7 +305,6 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             List of memories valid at that time
         """
         # Get candidates from graph query
-        # Note: SQLite doesn't support embedding-based search, so we get all and filter
         candidates = await self.graph_store.query_memories(limit=limit * 2)
 
         # Filter to memories valid at specified time

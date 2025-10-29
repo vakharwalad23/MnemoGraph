@@ -13,7 +13,6 @@ from src.core.embeddings.openai import OpenAIEmbedder
 from src.core.factory import EmbedderFactory, GraphStoreFactory, LLMFactory, VectorStoreFactory
 from src.core.graph_store.base import GraphStore
 from src.core.graph_store.neo4j_store import Neo4jGraphStore
-from src.core.graph_store.sqlite_store import SQLiteGraphStore
 from src.core.llm.base import LLMProvider
 from src.core.llm.ollama import OllamaLLM
 from src.core.llm.openai import OpenAILLM
@@ -194,18 +193,6 @@ class TestEmbedderFactory:
 class TestGraphStoreFactory:
     """Test graph store factory."""
 
-    def test_create_sqlite_graph_store(self):
-        """Test creating SQLite graph store."""
-        config = Config()
-        config.graph_backend = "sqlite"
-        config.sqlite.db_path = ":memory:"
-
-        graph_store = GraphStoreFactory.create(config)
-
-        assert isinstance(graph_store, SQLiteGraphStore)
-        assert isinstance(graph_store, GraphStore)
-        assert graph_store.db_path == ":memory:"
-
     def test_create_neo4j_graph_store(self):
         """Test creating Neo4j graph store."""
         config = Config()
@@ -380,7 +367,7 @@ class TestFactoryIntegration:
         config = Config()
         config.llm.provider = "ollama"
         config.embedder.provider = "ollama"
-        config.graph_backend = "sqlite"
+        config.graph_backend = "neo4j"
 
         # Create all components
         llm = LLMFactory.create(config.llm)
