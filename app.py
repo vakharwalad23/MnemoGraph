@@ -14,10 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from src.config import Config
-from src.core.embeddings.ollama import OllamaEmbedder
-from src.core.graph_store.neo4j_store import Neo4jGraphStore
-from src.core.llm.ollama import OllamaLLM
-from src.core.vector_store.qdrant import QdrantStore
+from src.core.factory import EmbedderFactory, GraphStoreFactory, LLMFactory, VectorStoreFactory
 from src.services.memory_engine import MemoryEngine
 
 # Configure logging
@@ -137,35 +134,30 @@ async def lifespan(app: FastAPI):
 
     logger.info("🚀 Starting MnemoGraph server...")
 
-    # Initialize components
-    config = Config(
-        graph_backend="neo4j",
+    # Load configuration from environment or use defaults
+    config = Config.from_env()
+    logger.info(
+        f"   Configuration: LLM={config.llm.provider}/{config.llm.model}, "
+        f"Embedder={config.embedder.provider}/{config.embedder.model}, "
+        f"Graph={config.graph_backend}"
     )
 
-    # LLM provider
-    llm = OllamaLLM(
-        host="http://localhost:11434",
-        model="llama3.1:8b",
-        timeout=120.0,
-    )
+    # Create components using factories
+    logger.info("   Creating LLM provider...")
+    llm = LLMFactory.create(config.llm)
 
-    # Embedder
-    embedder = OllamaEmbedder(
-        host="http://localhost:11434",
-        model="nomic-embed-text",
-        timeout=120.0,
-    )
+    logger.info("   Creating embedder...")
+    embedder = EmbedderFactory.create(config.embedder)
 
-    # Graph store (using SQLite for simplicity, can switch to Neo4j)
-    graph_store = Neo4jGraphStore(
-        uri="bolt://localhost:7687", username="neo4j", password="password"
-    )
+    logger.info("   Creating graph store...")
+    graph_store = GraphStoreFactory.create(config)
 
-    # Vector store
-    vector_store = QdrantStore(
-        collection_name="mnemograph_memories",
-        vector_size=768,  # nomic-embed-text dimension
-    )
+    logger.info("   Detecting embedding dimension...")
+    vector_size = await EmbedderFactory.get_dimension(embedder, config.embedder)
+    logger.info(f"   Embedding dimension: {vector_size}")
+
+    logger.info("   Creating vector store...")
+    vector_store = VectorStoreFactory.create(config.qdrant, vector_size)
 
     # Create and initialize engine
     engine = MemoryEngine(

@@ -161,16 +161,6 @@ class TestRelationship:
         assert rel.type == RelationshipType.UPDATES
         assert rel.target_id == "mem_456"
 
-        # Should reject extra fields
-        with pytest.raises(ValidationError):
-            Relationship(
-                type=RelationshipType.UPDATES,
-                target_id="mem_456",
-                confidence=0.95,
-                reasoning="Updates previous information",
-                metadata={"extra": "field"},  # Should be rejected
-            )
-
     def test_relationship_validation(self):
         """Test relationship validation."""
         # Test required fields

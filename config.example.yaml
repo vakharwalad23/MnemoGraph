@@ -1,0 +1,60 @@
+# MnemoGraph Configuration File
+# Alternative to environment variables
+
+llm:
+  provider: ollama # ollama, openai
+  model: llama3.1:8b
+  base_url: http://localhost:11434
+  api_key: null # Set for OpenAI
+  temperature: 0.0
+  max_tokens: 2000
+  timeout: 120.0
+
+embedder:
+  provider: ollama
+  model: nomic-embed-text
+  base_url: http://localhost:11434
+  api_key: null # Set for OpenAI
+  timeout: 120.0
+  dimension: null # Auto-detected if not set
+
+graph_backend: sqlite # sqlite or neo4j
+
+neo4j:
+  uri: bolt://localhost:7687
+  username: neo4j
+  password: password
+  database: neo4j
+
+sqlite:
+  db_path: data/mnemo_graph.db
+
+qdrant:
+  url: http://localhost:6333
+  collection_name: memories
+  use_grpc: true
+  hnsw_m: 16
+  hnsw_ef_construct: 100
+  use_quantization: true
+  quantization_type: int8
+  on_disk: false
+  batch_size: 100
+  timeout: 30
+
+llm_relationships:
+  min_confidence: 0.5
+  min_derived_confidence: 0.7
+  context_window: 50
+  recent_window_days: 30
+  graph_depth: 2
+  enable_derived_memories: true
+  enable_auto_invalidation: true
+
+memory_evolution:
+  preserve_history: true
+  auto_detect_updates: true
+  max_version_history: 100
+  enable_time_travel: true
+
+debug: false
+log_level: INFO
