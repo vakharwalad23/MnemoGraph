@@ -310,17 +310,22 @@ class InvalidationManager:
                 continue
 
             # Ask LLM: Does new memory supersede this one?
-            prompt = f"""
+            current_dt = datetime.now()
+
+            prompt = f"""[CURRENT DATE/TIME: {current_dt.strftime('%Y-%m-%d %H:%M:%S')}]
+
 Analyze if a new memory supersedes an existing one.
 
 Existing Memory:
 Content: {candidate.content}
-Created: {candidate.created_at}
+Created: {candidate.created_at.strftime('%Y-%m-%d %H:%M:%S')}
 Status: {candidate.status.value}
 
 New Memory:
 Content: {new_memory.content}
-Created: {new_memory.created_at}
+Created: {new_memory.created_at.strftime('%Y-%m-%d %H:%M:%S')}
+
+Important: Use the CURRENT DATE/TIME above as your reference point for temporal ordering.
 
 Does the new memory:
 1. Update/correct the existing memory? (action: "supersede")
@@ -384,17 +389,22 @@ Respond with JSON:
         Returns:
             Invalidation result with status and reasoning
         """
-        prompt = f"""
+        current_dt = datetime.now()
+
+        prompt = f"""[CURRENT DATE/TIME: {current_dt.strftime('%Y-%m-%d %H:%M:%S')}]
+
 Analyze this memory for relevance and validity.
 
 Memory:
 Content: {memory.content}
-Created: {memory.created_at}
-Last accessed: {memory.last_accessed}
+Created: {memory.created_at.strftime('%Y-%m-%d %H:%M:%S')} ({memory.age_days()} days ago)
+Last accessed: {memory.last_accessed.strftime('%Y-%m-%d %H:%M:%S') if memory.last_accessed else 'Never'}
 Access count: {memory.access_count}
 Age: {memory.age_days()} days
 
 {f"Context: {context}" if context else ""}
+
+Important: Use the CURRENT DATE/TIME above as your reference point for all temporal reasoning.
 
 Determine if this memory is:
 1. "active" - Still accurate and relevant
