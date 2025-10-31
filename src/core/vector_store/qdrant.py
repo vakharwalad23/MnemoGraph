@@ -256,7 +256,7 @@ class QdrantStore(VectorStore):
         await self.client.upsert(
             collection_name=self.collection_name,
             points=[point],
-            wait=False,  # Don't wait for indexing
+            wait=True,  # Wait for write to complete for consistency
         )
 
     async def batch_upsert(self, memories: list[Memory], batch_size: int = 100) -> None:
@@ -469,6 +469,7 @@ class QdrantStore(VectorStore):
         await self.client.delete(
             collection_name=self.collection_name,
             points_selector=[uuid_id],
+            wait=True,  # Wait for delete to complete for consistency
         )
 
     async def count_memories(self, filters: dict[str, Any] | None = None) -> int:

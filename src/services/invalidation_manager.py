@@ -19,6 +19,7 @@ from src.core.llm.base import LLMProvider
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, MemoryStatus
 from src.models.version import InvalidationResult
+from src.services.memory_sync import MemorySyncManager
 
 
 class ValidationCheck(BaseModel):
@@ -52,6 +53,7 @@ class InvalidationManager:
         llm: LLMProvider,
         graph_store: GraphStore,
         vector_store: VectorStore,
+        sync_manager: MemorySyncManager | None = None,
     ):
         """
         Initialize invalidation manager.
@@ -60,10 +62,12 @@ class InvalidationManager:
             llm: LLM provider for semantic evaluation
             graph_store: Graph database
             vector_store: Vector database
+            sync_manager: Optional sync manager for atomic updates
         """
         self.llm = llm
         self.graph_store = graph_store
         self.vector_store = vector_store
+        self.sync_manager = sync_manager
 
         # Background worker task
         self._worker_task: asyncio.Task | None = None
@@ -351,7 +355,12 @@ Respond with JSON:
                     candidate.superseded_by = new_memory.id
                     candidate.invalidation_reason = result.reasoning
 
+                    # Update graph store first
                     await self.graph_store.update_node(candidate)
+
+                    # Sync supersession to vector store if sync manager available
+                    if self.sync_manager:
+                        await self.sync_manager.sync_memory_supersession(candidate)
 
                     superseded.append(candidate)
 
@@ -432,7 +441,12 @@ Respond with JSON:
         if result.superseded_by:
             memory.superseded_by = result.superseded_by
 
+        # Update graph store first
         await self.graph_store.update_node(memory)
+
+        # Sync invalidation state to vector store if sync manager available
+        if self.sync_manager:
+            await self.sync_manager.sync_memory_invalidation(memory)
 
         return memory
 
