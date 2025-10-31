@@ -21,6 +21,7 @@ from src.models.relationships import (
 )
 from src.services.context_filter import MultiStageFilter
 from src.services.invalidation_manager import InvalidationManager
+from src.services.memory_sync import MemorySyncManager
 
 
 class LLMRelationshipEngine:
@@ -41,6 +42,7 @@ class LLMRelationshipEngine:
         vector_store: VectorStore,
         graph_store: GraphStore,
         config: Config,
+        sync_manager: MemorySyncManager,
     ):
         """
         Initialize LLM relationship engine.
@@ -61,7 +63,9 @@ class LLMRelationshipEngine:
         # Initialize sub-systems
         self.filter = MultiStageFilter(vector_store, graph_store, llm_provider, config)
 
-        self.invalidation = InvalidationManager(llm_provider, graph_store, vector_store)
+        self.invalidation = InvalidationManager(
+            llm_provider, graph_store, vector_store, sync_manager
+        )
 
     async def process_new_memory(self, memory: Memory) -> RelationshipBundle:
         """

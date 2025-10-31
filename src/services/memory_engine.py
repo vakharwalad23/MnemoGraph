@@ -92,6 +92,7 @@ class MemoryEngine:
             vector_store=vector_store,
             graph_store=graph_store,
             config=config,
+            sync_manager=self.sync_manager,
         )
 
     async def initialize(self) -> None:

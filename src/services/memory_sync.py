@@ -153,12 +153,28 @@ class MemorySyncManager:
         Use for: new memories, content updates, embedding changes, status updates,
         invalidation, supersession, or any other memory state changes.
 
+        If embedding is missing, automatically retrieves it from vector store.
+
         Args:
             memory: Complete memory object to sync
 
         Raises:
-            SyncError: If sync fails after retries
+            SyncError: If sync fails after retries or if embedding cannot be found
         """
+        # If embedding is missing or empty, try to get it from vector store
+        if not memory.embedding or len(memory.embedding) == 0:
+            logger.debug(
+                f"Embedding missing for {memory.id}, attempting to retrieve from vector store"
+            )
+            vector_memory = await self.vector_store.get_memory(memory.id)
+            if vector_memory and vector_memory.embedding and len(vector_memory.embedding) > 0:
+                memory.embedding = vector_memory.embedding
+                logger.debug(f"Retrieved embedding for {memory.id} from vector store")
+            else:
+                raise SyncError(
+                    f"Cannot sync {memory.id}: no embedding found. "
+                    "Memory needs to be re-embedded with embedder.embed() before syncing."
+                )
 
         async def _sync():
             await self.vector_store.upsert_memory(memory)
