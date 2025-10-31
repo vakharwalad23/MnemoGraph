@@ -147,21 +147,19 @@ class TestRelationship:
         assert rel.target_id == "mem_123"
         assert rel.confidence == 0.85
         assert rel.reasoning == "Both discuss Python frameworks"
-        assert rel.metadata == {}
 
-    def test_relationship_with_metadata(self):
-        """Test relationship with metadata."""
-        metadata = {"aspect": "technical", "strength": "high"}
+    def test_relationship_strict_schema(self):
+        """Test relationship with strict schema (no extra fields allowed)."""
+        # Should work with exact fields
         rel = Relationship(
             type=RelationshipType.UPDATES,
             target_id="mem_456",
             confidence=0.95,
             reasoning="Updates previous information",
-            metadata=metadata,
         )
 
-        assert rel.metadata == metadata
-        assert rel.metadata["aspect"] == "technical"
+        assert rel.type == RelationshipType.UPDATES
+        assert rel.target_id == "mem_456"
 
     def test_relationship_validation(self):
         """Test relationship validation."""

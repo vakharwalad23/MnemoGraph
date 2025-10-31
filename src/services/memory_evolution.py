@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from src.core.embeddings.base import Embedder
 from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
+from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, MemoryStatus
 from src.models.version import MemoryEvolution, VersionChain, VersionChange
 
@@ -58,8 +59,9 @@ class MemoryEvolutionService:
     def __init__(
         self,
         llm: LLMProvider,
-        graph_store: GraphStore,  # Will be properly typed in integration
-        embedder: Embedder,  # Will be properly typed in integration
+        graph_store: GraphStore,
+        embedder: Embedder,
+        vector_store: VectorStore | None = None,
     ):
         """
         Initialize memory evolution service.
@@ -68,10 +70,12 @@ class MemoryEvolutionService:
             llm: LLM provider for evolution analysis
             graph_store: Graph database for storing memory nodes
             embedder: Embedder for generating embeddings
+            vector_store: Optional vector store for semantic search in time travel queries
         """
         self.llm = llm
         self.graph_store = graph_store
         self.embedder = embedder
+        self.vector_store = vector_store
 
     async def evolve_memory(self, current: Memory, new_info: str) -> MemoryEvolution:
         """
@@ -289,29 +293,66 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
         )
 
     async def time_travel_query(
-        self, query_embedding: list[float], as_of: datetime, limit: int = 10
+        self,
+        query_embedding: list[float] | None,
+        as_of: datetime,
+        limit: int = 10,
+        use_semantic_search: bool = True,
     ) -> list[Memory]:
         """
         Query memories as they existed at a specific point in time.
 
-        Returns only memories that were valid at the specified time.
+        Supports both semantic + temporal filtering (hybrid) and temporal-only modes.
 
         Args:
-            query_embedding: Query vector
+            query_embedding: Query vector for semantic search. If None, falls back to temporal-only.
             as_of: Point in time to query
             limit: Maximum results
+            use_semantic_search: Enable semantic similarity search (requires query_embedding and vector_store)
 
         Returns:
-            List of memories valid at that time
+            List of memories valid at that time, optionally ranked by semantic similarity
         """
-        # Get candidates from graph query
-        # Note: SQLite doesn't support embedding-based search, so we get all and filter
-        candidates = await self.graph_store.query_memories(limit=limit * 2)
+        # Hybrid approach: Semantic search + temporal filtering
+        if use_semantic_search and self.vector_store and query_embedding:
+            # Step 1: Get semantically similar memories from vector store
+            similar_results = await self.vector_store.search_similar(
+                vector=query_embedding,
+                limit=limit * 5,  # Get more candidates for temporal filtering
+            )
 
-        # Filter to memories valid at specified time
+            # Step 2: Filter by temporal validity
+            valid_memories = []
+            for result in similar_results:
+                memory = result.memory
+                # Check if memory was valid at the specified time
+                if memory.valid_from <= as_of and (
+                    memory.valid_until is None or memory.valid_until > as_of
+                ):
+                    valid_memories.append(memory)
+
+                    if len(valid_memories) >= limit:
+                        break
+
+            return valid_memories[:limit]
+
+        # Fallback: Temporal-only filtering (no semantic search)
+        # Use Neo4j's temporal filtering capabilities
+        filters = {
+            "created_before": as_of.isoformat(),
+        }
+
+        # Get all candidates that could have been valid at that time
+        candidates = await self.graph_store.query_memories(
+            filters=filters,
+            order_by="created_at DESC",
+            limit=limit * 3,  # Get more candidates to ensure we have enough valid ones
+        )
+
+        # Filter to memories that were temporally valid at the specified time
         valid_memories = []
         for memory in candidates:
-            # Check temporal validity
+            # Check temporal validity window
             if memory.valid_from <= as_of and (
                 memory.valid_until is None or memory.valid_until > as_of
             ):
@@ -320,7 +361,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
                 if len(valid_memories) >= limit:
                     break
 
-        return valid_memories
+        return valid_memories[:limit]
 
     async def get_current_version(self, memory_id: str) -> Memory:
         """

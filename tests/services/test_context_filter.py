@@ -15,24 +15,24 @@ from src.services.context_filter import MultiStageFilter
 class TestMultiStageFilterUnit:
     """Unit tests for MultiStageFilter."""
 
-    async def test_initialization(self, mock_vector_store, sqlite_graph_store, mock_llm, config):
+    async def test_initialization(self, mock_vector_store, neo4j_graph_store, mock_llm, config):
         """Test filter initialization."""
         filter_service = MultiStageFilter(
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             llm_provider=mock_llm,
             config=config,
         )
 
         assert filter_service.vector_store == mock_vector_store
-        assert filter_service.graph_store == sqlite_graph_store
+        assert filter_service.graph_store == neo4j_graph_store
         assert filter_service.llm == mock_llm
         assert filter_service.config == config
 
     async def test_stage1_vector_search(
         self,
         mock_vector_store,
-        sqlite_graph_store,
+        neo4j_graph_store,
         mock_llm,
         config,
         sample_memory,
@@ -42,7 +42,7 @@ class TestMultiStageFilterUnit:
         # Setup
         filter_service = MultiStageFilter(
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -60,7 +60,7 @@ class TestMultiStageFilterUnit:
     async def test_temporal_filter(
         self,
         mock_vector_store,
-        sqlite_graph_store,
+        neo4j_graph_store,
         mock_llm,
         config,
         sample_memory,
@@ -69,14 +69,14 @@ class TestMultiStageFilterUnit:
         """Test temporal filtering."""
         filter_service = MultiStageFilter(
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             llm_provider=mock_llm,
             config=config,
         )
 
         # Add memories to graph store
         for mem in sample_memories:
-            await sqlite_graph_store.add_node(mem)
+            await neo4j_graph_store.add_node(mem)
 
         # Test temporal filter
         results = await filter_service._temporal_filter(sample_memory)
@@ -87,12 +87,12 @@ class TestMultiStageFilterUnit:
             assert mem.status == MemoryStatus.ACTIVE
 
     async def test_graph_filter_no_neighbors(
-        self, mock_vector_store, sqlite_graph_store, mock_llm, config, sample_memory
+        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memory
     ):
         """Test graph filter when memory has no neighbors."""
         filter_service = MultiStageFilter(
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -104,12 +104,12 @@ class TestMultiStageFilterUnit:
         assert len(results) == 0  # No neighbors for new memory
 
     async def test_entity_filter(
-        self, mock_vector_store, sqlite_graph_store, mock_llm, config, sample_memory
+        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memory
     ):
         """Test entity extraction and filtering."""
         filter_service = MultiStageFilter(
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -122,12 +122,12 @@ class TestMultiStageFilterUnit:
         # (No call_count check since we're using real Ollama)
 
     async def test_conversation_filter_no_conversation(
-        self, mock_vector_store, sqlite_graph_store, mock_llm, config, sample_memory
+        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memory
     ):
         """Test conversation filter when no conversation_id."""
         filter_service = MultiStageFilter(
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -139,12 +139,12 @@ class TestMultiStageFilterUnit:
         assert len(results) == 0
 
     async def test_conversation_filter_with_conversation(
-        self, mock_vector_store, sqlite_graph_store, mock_llm, config
+        self, mock_vector_store, neo4j_graph_store, mock_llm, config
     ):
         """Test conversation filter with conversation_id."""
         filter_service = MultiStageFilter(
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -162,7 +162,7 @@ class TestMultiStageFilterUnit:
         ]
 
         for mem in conv_memories:
-            await sqlite_graph_store.add_node(mem)
+            await neo4j_graph_store.add_node(mem)
 
         # Test with conversation memory
         test_memory = Memory(
@@ -180,12 +180,12 @@ class TestMultiStageFilterUnit:
         assert len(results) <= 10
 
     async def test_deduplicate(
-        self, mock_vector_store, sqlite_graph_store, mock_llm, config, sample_memories
+        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memories
     ):
         """Test deduplication of memories."""
         filter_service = MultiStageFilter(
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -202,12 +202,12 @@ class TestMultiStageFilterUnit:
         assert len(ids) == len(set(ids))
 
     async def test_combine_and_deduplicate(
-        self, mock_vector_store, sqlite_graph_store, mock_llm, config, sample_memories
+        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memories
     ):
         """Test combining and deduplicating results."""
         filter_service = MultiStageFilter(
             vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
+            graph_store=neo4j_graph_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -227,45 +227,6 @@ class TestMultiStageFilterUnit:
         # Should have all unique memories
         ids = [m.id for m in combined]
         assert len(ids) == len(set(ids))
-
-
-@pytest.mark.unit
-@pytest.mark.sqlite
-@pytest.mark.asyncio
-class TestMultiStageFilterSQLite:
-    """Integration tests with SQLite."""
-
-    async def test_gather_context_sqlite(
-        self,
-        mock_vector_store,
-        sqlite_graph_store,
-        mock_llm,
-        config,
-        sample_memory,
-        sample_memories,
-    ):
-        """Test full context gathering with SQLite."""
-        filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=sqlite_graph_store,
-            llm_provider=mock_llm,
-            config=config,
-        )
-
-        # Setup data
-        for mem in sample_memories:
-            await mock_vector_store.upsert_memory(mem)
-            await sqlite_graph_store.add_node(mem)
-
-        # Gather context
-        context = await filter_service.gather_context(sample_memory)
-
-        assert context is not None
-        assert hasattr(context, "vector_candidates")
-        assert hasattr(context, "temporal_context")
-        assert hasattr(context, "graph_context")
-        assert hasattr(context, "filtered_candidates")
-        assert isinstance(context.filtered_candidates, list)
 
 
 @pytest.mark.integration

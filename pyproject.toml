@@ -7,7 +7,6 @@ requires-python = ">=3.12"
 dependencies = [
     "qdrant-client",
     "neo4j",
-    "aiosqlite",
     "pydantic",
     "numpy",
     "scikit-learn",
@@ -19,6 +18,8 @@ dependencies = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
+    "python-dotenv",
+    "pyyaml",
 ]
 
 [tool.uv]

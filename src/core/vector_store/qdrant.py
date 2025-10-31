@@ -49,6 +49,11 @@ class QdrantStore(VectorStore):
         vector_size: int = 768,
         use_grpc: bool = False,  # Set to True for production
         use_quantization: bool = False,  # Set to True for large datasets
+        quantization_type: str = "int8",  # int8 or scalar
+        hnsw_m: int = 16,  # HNSW M parameter (16-32 recommended)
+        # HNSW ef_construct (higher = better quality)
+        hnsw_ef_construct: int = 100,
+        on_disk: bool = False,  # Store vectors on disk instead of RAM
     ):
         """
         Initialize Qdrant store.
@@ -60,6 +65,10 @@ class QdrantStore(VectorStore):
             vector_size: Embedding dimension
             use_grpc: Use gRPC connection (faster)
             use_quantization: Use int8 quantization (memory efficient)
+            quantization_type: Type of quantization (int8, scalar)
+            hnsw_m: HNSW M parameter (connections per node)
+            hnsw_ef_construct: HNSW ef_construct parameter
+            on_disk: Store vectors on disk (reduces RAM usage)
         """
         self.host = host
         self.port = port
@@ -67,6 +76,10 @@ class QdrantStore(VectorStore):
         self.vector_size = vector_size
         self.use_grpc = use_grpc
         self.use_quantization = use_quantization
+        self.quantization_type = quantization_type
+        self.hnsw_m = hnsw_m
+        self.hnsw_ef_construct = hnsw_ef_construct
+        self.on_disk = on_disk
         self.client: AsyncQdrantClient | None = None
 
     def _to_uuid(self, id_str: str) -> str:
@@ -109,10 +122,11 @@ class QdrantStore(VectorStore):
                 distance=Distance.COSINE,
                 # HNSW indexing for fast search
                 hnsw_config=HnswConfigDiff(
-                    m=16,  # 16-32 recommended
-                    ef_construct=100,  # Higher = better quality
+                    m=self.hnsw_m,
+                    ef_construct=self.hnsw_ef_construct,
                     full_scan_threshold=10000,
                 ),
+                on_disk=self.on_disk,
             )
 
             # Add quantization if enabled
