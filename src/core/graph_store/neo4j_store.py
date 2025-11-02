@@ -86,9 +86,7 @@ class Neo4jGraphStore(GraphStore):
                 "CREATE INDEX memory_version IF NOT EXISTS " "FOR (m:Memory) ON (m.version)"
             )
 
-    # ═══════════════════════════════════════════════════════════
     # NODE OPERATIONS
-    # ═══════════════════════════════════════════════════════════
 
     async def add_node(self, memory: Memory) -> None:
         """Add a memory node to the graph."""
@@ -236,9 +234,7 @@ class Neo4jGraphStore(GraphStore):
 
             return memories
 
-    # ═══════════════════════════════════════════════════════════
     # EDGE OPERATIONS
-    # ═══════════════════════════════════════════════════════════
 
     async def add_edge(self, edge: dict[str, Any] | Edge) -> str:
         """Add an edge between two nodes."""
@@ -389,9 +385,7 @@ class Neo4jGraphStore(GraphStore):
         async with self.driver.session(database=self.database) as session:
             await session.run("MATCH ()-[r {id: $edge_id}]->() DELETE r", {"edge_id": edge_id})
 
-    # ═══════════════════════════════════════════════════════════
     # GRAPH TRAVERSAL
-    # ═══════════════════════════════════════════════════════════
 
     async def get_neighbors(
         self,
@@ -488,9 +482,7 @@ class Neo4jGraphStore(GraphStore):
 
             return record["node_ids"]
 
-    # ═══════════════════════════════════════════════════════════
     # UTILITY METHODS
-    # ═══════════════════════════════════════════════════════════
 
     async def count_nodes(self, filters: dict[str, Any] | None = None) -> int:
         """Count nodes matching filters."""
@@ -531,9 +523,7 @@ class Neo4jGraphStore(GraphStore):
             await self.driver.close()
             self.driver = None
 
-    # ═══════════════════════════════════════════════════════════
     # HELPER METHODS
-    # ═══════════════════════════════════════════════════════════
 
     def _node_to_memory(self, node) -> Memory:
         """Convert Neo4j node to Memory object."""

@@ -112,9 +112,7 @@ class MemoryEngine:
 
         print("✅ Memory Engine ready!")
 
-    # ═══════════════════════════════════════════════════════════
     # CORE MEMORY OPERATIONS
-    # ═══════════════════════════════════════════════════════════
 
     async def add_memory(
         self,
@@ -246,9 +244,7 @@ class MemoryEngine:
 
         print(f"✅ Memory deleted: {memory_id}")
 
-    # ═══════════════════════════════════════════════════════════
     # SEARCH & QUERY OPERATIONS
-    # ═══════════════════════════════════════════════════════════
 
     async def search_similar(
         self,
@@ -348,9 +344,7 @@ class MemoryEngine:
         """
         return await self.graph_store.find_path(start_id, end_id, max_depth)
 
-    # ═══════════════════════════════════════════════════════════
     # VERSIONING & HISTORY OPERATIONS
-    # ═══════════════════════════════════════════════════════════
 
     async def get_version_history(self, memory_id: str) -> VersionChain:
         """
@@ -392,9 +386,7 @@ class MemoryEngine:
 
         return await self.evolution.time_travel_query(query_embedding, as_of, limit)
 
-    # ═══════════════════════════════════════════════════════════
     # INVALIDATION OPERATIONS
-    # ═══════════════════════════════════════════════════════════
 
     async def check_memory_validity(self, memory_id: str) -> InvalidationResult:
         """
@@ -435,9 +427,7 @@ class MemoryEngine:
 
         await self.invalidation._mark_invalidated(memory, result)
 
-    # ═══════════════════════════════════════════════════════════
     # STATISTICS & MONITORING
-    # ═══════════════════════════════════════════════════════════
 
     async def get_statistics(self) -> dict[str, Any]:
         """
@@ -470,9 +460,7 @@ class MemoryEngine:
             },
         }
 
-    # ═══════════════════════════════════════════════════════════
     # LIFECYCLE MANAGEMENT
-    # ═══════════════════════════════════════════════════════════
 
     async def close(self) -> None:
         """Close all connections and stop workers."""
@@ -491,9 +479,7 @@ class MemoryEngine:
 
         print("✅ Memory Engine shutdown complete")
 
-    # ═══════════════════════════════════════════════════════════
     # HELPER METHODS
-    # ═══════════════════════════════════════════════════════════
 
     def _generate_id(self) -> str:
         """Generate unique memory ID."""
