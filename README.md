@@ -6,6 +6,8 @@ MnemoGraph is an experimental memory management system that leverages Large Lang
 
 > **⚠️ Development Status**: MnemoGraph is under active development. Features are being tested and refined. Contributions and feedback are welcome as we continue to improve the system.
 
+> **🚀 Coming Soon: Brain-Like Retrieval System** - We're implementing a revolutionary "RAG on Steroids" retrieval mode that mimics how human memory works. This will combine vector similarity with relationship-based traversal, temporal scoring, and multi-factor ranking to deliver unprecedented retrieval accuracy.
+
 ---
 
 ## ✨ Current Features
