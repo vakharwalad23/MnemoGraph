@@ -19,9 +19,7 @@ from src.config import Config
 from src.core.factory import EmbedderFactory, GraphStoreFactory, LLMFactory, VectorStoreFactory
 from src.models.memory import Memory, MemoryStatus, NodeType
 
-# ═══════════════════════════════════════════════════════════
 # Configuration
-# ═══════════════════════════════════════════════════════════
 
 
 def get_test_config() -> Config:
@@ -36,9 +34,7 @@ def get_test_config() -> Config:
     return Config.from_env()
 
 
-# ═══════════════════════════════════════════════════════════
 # Fixtures
-# ═══════════════════════════════════════════════════════════
 
 
 @pytest.fixture
@@ -213,9 +209,7 @@ def config() -> Config:
     return config
 
 
-# ═══════════════════════════════════════════════════════════
 # Fixture Aliases for Backward Compatibility
-# ═══════════════════════════════════════════════════════════
 
 
 @pytest.fixture

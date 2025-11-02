@@ -89,27 +89,21 @@ class MultiStageFilter:
         Returns:
             Complete context bundle
         """
-        # ═══════════════════════════════════════════════════════
         # STAGE 1: Vector Search (Fast Pre-filtering)
-        # ═══════════════════════════════════════════════════════
         # Goal: 1M+ memories → ~100 candidates in 10-50ms
 
         start = time.time()
         vector_candidates = await self._stage1_vector_search(new_memory)
         stage1_time = (time.time() - start) * 1000
 
-        # ═══════════════════════════════════════════════════════
         # STAGE 2: Multi-Dimensional Context Gathering (Parallel)
-        # ═══════════════════════════════════════════════════════
         # Goal: Gather context from multiple dimensions
 
         start = time.time()
         context_results = await self._stage2_hybrid_filtering(new_memory)
         stage2_time = (time.time() - start) * 1000
 
-        # ═══════════════════════════════════════════════════════
         # STAGE 3: LLM Pre-filtering (Smart Filter)
-        # ═══════════════════════════════════════════════════════
         # Goal: 50 candidates → 15-20 highly relevant
 
         start = time.time()

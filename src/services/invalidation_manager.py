@@ -72,9 +72,7 @@ class InvalidationManager:
         # Background worker task
         self._worker_task: asyncio.Task | None = None
 
-    # ═══════════════════════════════════════════════════════════
     # 1. ON-DEMAND INVALIDATION (Lazy Evaluation)
-    # ═══════════════════════════════════════════════════════════
 
     async def validate_on_access(self, memory: Memory, current_context: str = "") -> Memory:
         """
@@ -153,9 +151,7 @@ class InvalidationManager:
         # Medium age: validate every 30 days
         return days_since_validation > 30
 
-    # ═══════════════════════════════════════════════════════════
     # 2. PROACTIVE INVALIDATION (Background Worker)
-    # ═══════════════════════════════════════════════════════════
 
     def start_background_worker(self, interval_hours: int = 24):
         """
@@ -283,9 +279,7 @@ class InvalidationManager:
         except Exception as e:
             print(f"Error validating {memory.id}: {e}")
 
-    # ═══════════════════════════════════════════════════════════
     # 3. EVENT-DRIVEN INVALIDATION
-    # ═══════════════════════════════════════════════════════════
 
     async def check_supersession(
         self, new_memory: Memory, similar_memories: list[Memory]
@@ -374,9 +368,7 @@ Respond with JSON:
 
         return superseded
 
-    # ═══════════════════════════════════════════════════════════
     # SHARED UTILITIES
-    # ═══════════════════════════════════════════════════════════
 
     async def check_invalidation(self, memory: Memory, context: str = "") -> InvalidationResult:
         """
