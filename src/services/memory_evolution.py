@@ -18,6 +18,7 @@ from src.core.llm.base import LLMProvider
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, MemoryStatus
 from src.models.version import MemoryEvolution, VersionChain, VersionChange
+from src.services.memory_sync import MemorySyncManager
 
 
 class EvolutionAnalysis(BaseModel):
@@ -62,6 +63,7 @@ class MemoryEvolutionService:
         graph_store: GraphStore,
         embedder: Embedder,
         vector_store: VectorStore | None = None,
+        sync_manager: MemorySyncManager | None = None,
     ):
         """
         Initialize memory evolution service.
@@ -71,11 +73,13 @@ class MemoryEvolutionService:
             graph_store: Graph database for storing memory nodes
             embedder: Embedder for generating embeddings
             vector_store: Optional vector store for semantic search in time travel queries
+            sync_manager: Optional sync manager for atomic updates
         """
         self.llm = llm
         self.graph_store = graph_store
         self.embedder = embedder
         self.vector_store = vector_store
+        self.sync_manager = sync_manager
 
     async def evolve_memory(self, current: Memory, new_info: str) -> MemoryEvolution:
         """
@@ -108,9 +112,15 @@ class MemoryEvolutionService:
             current.invalidation_reason = f"Superseded: {analysis.change_description}"
             current.updated_at = datetime.now()
 
-            # Save both versions
+            # Save both versions - graph store first
             await self.graph_store.update_node(current)
             await self.graph_store.add_node(new_version)
+
+            # Sync supersession to vector store if sync manager available
+            if self.sync_manager:
+                await self.sync_manager.sync_memory_supersession(current)
+                # Sync new version as well
+                await self.sync_manager.sync_memory_full(new_version)
 
             return MemoryEvolution(
                 current_version=current.id,
@@ -182,7 +192,7 @@ New Information:
 {new_info}
 
 Determine the best action:
-1. "update" - New info corrects/updates the current memory (create new version)
+1. "update" - New info updates the current memory (create new version)
 2. "augment" - New info adds details without contradicting (append to existing)
 3. "replace" - New info completely replaces the memory (create new version)
 4. "preserve" - New info contradicts; both should be kept as separate memories
@@ -428,8 +438,14 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
         current.superseded_by = new_version.id
         current.invalidation_reason = f"Rolled back to version {target.version}"
 
-        # Save both
+        # Save both - graph store first
         await self.graph_store.update_node(current)
         await self.graph_store.add_node(new_version)
+
+        # Sync changes to vector store if sync manager available
+        if self.sync_manager:
+            await self.sync_manager.sync_memory_supersession(current)
+            # Sync new version as well
+            await self.sync_manager.sync_memory_full(new_version)
 
         return new_version

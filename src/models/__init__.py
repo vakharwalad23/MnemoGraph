@@ -20,6 +20,7 @@ from src.models.relationships import (
 )
 from src.models.version import (
     InvalidationResult,
+    InvalidationStatus,
     MemoryEvolution,
     VersionChain,
     VersionChange,
@@ -35,6 +36,7 @@ __all__ = [
     "VersionChange",
     "VersionChain",
     "InvalidationResult",
+    "InvalidationStatus",
     # Relationship models
     "RelationshipType",
     "Edge",

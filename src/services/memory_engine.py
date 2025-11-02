@@ -22,6 +22,7 @@ from src.models.version import InvalidationResult, MemoryEvolution, VersionChain
 from src.services.invalidation_manager import InvalidationManager
 from src.services.llm_relationship_engine import LLMRelationshipEngine
 from src.services.memory_evolution import MemoryEvolutionService
+from src.services.memory_sync import MemorySyncManager
 
 
 class MemoryEngine:
@@ -61,18 +62,28 @@ class MemoryEngine:
         self.vector_store = vector_store
         self.config = config
 
+        # Initialize sync manager first
+        self.sync_manager = MemorySyncManager(
+            graph_store=graph_store,
+            vector_store=vector_store,
+            max_retries=3,
+            retry_delay=0.5,
+        )
+
         # Initialize Phase 2 & 3 services
         self.evolution = MemoryEvolutionService(
             llm=llm,
             graph_store=graph_store,
             embedder=embedder,
             vector_store=vector_store,
+            sync_manager=self.sync_manager,
         )
 
         self.invalidation = InvalidationManager(
             llm=llm,
             graph_store=graph_store,
             vector_store=vector_store,
+            sync_manager=self.sync_manager,
         )
 
         self.relationship_engine = LLMRelationshipEngine(
@@ -81,6 +92,7 @@ class MemoryEngine:
             vector_store=vector_store,
             graph_store=graph_store,
             config=config,
+            sync_manager=self.sync_manager,
         )
 
     async def initialize(self) -> None:
@@ -201,12 +213,18 @@ class MemoryEngine:
             # Generate new embedding
             new_memory.embedding = await self.embedder.embed(new_content)
 
-            # Update vector store
-            await self.vector_store.upsert_memory(new_memory)
+            # Update both stores with sync manager
+            await self.graph_store.update_node(new_memory)
+            await self.sync_manager.sync_memory_full(new_memory)
 
             print(f"✅ Memory updated with new version: {evolution.new_version}")
 
             return new_memory, evolution
+
+        # For augment, sync the updated memory
+        updated_memory = await self.graph_store.get_node(memory_id)
+        if updated_memory:
+            await self.sync_manager.sync_memory_full(updated_memory)
 
         print(f"✅ Memory augmented: {memory_id}")
         return current, evolution
@@ -220,8 +238,11 @@ class MemoryEngine:
         """
         print(f"🗑️  Deleting memory: {memory_id}")
 
+        # Delete from graph store first (source of truth)
         await self.graph_store.delete_node(memory_id)
-        await self.vector_store.delete_memory(memory_id)
+
+        # Sync deletion to vector store
+        await self.sync_manager.sync_memory_deletion(memory_id)
 
         print(f"✅ Memory deleted: {memory_id}")
 
@@ -403,11 +424,11 @@ class MemoryEngine:
         if not memory:
             raise ValueError(f"Memory not found: {memory_id}")
 
-        from src.models.version import InvalidationResult
+        from src.models.version import InvalidationResult, InvalidationStatus
 
         result = InvalidationResult(
             memory_id=memory_id,
-            status="invalidated",
+            status=InvalidationStatus.INVALIDATED,
             reasoning=reason,
             confidence=1.0,
         )

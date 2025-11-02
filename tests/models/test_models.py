@@ -20,6 +20,7 @@ from src.models.relationships import (
 )
 from src.models.version import (
     InvalidationResult,
+    InvalidationStatus,
     MemoryEvolution,
     VersionChain,
     VersionChange,
@@ -438,31 +439,29 @@ class TestInvalidationResult:
         """Test basic invalidation creation."""
         result = InvalidationResult(
             memory_id="mem_001",
-            status="superseded",
+            status=InvalidationStatus.ACTIVE,
             reasoning="New information available",
             confidence=0.95,
-            superseded_by="mem_002",
         )
 
         assert result.memory_id == "mem_001"
-        assert result.status == "superseded"
+        assert result.status == InvalidationStatus.ACTIVE
         assert result.reasoning == "New information available"
         assert result.confidence == 0.95
-        assert result.superseded_by == "mem_002"
         assert result.preserve_as is None
 
     def test_invalidation_preservation(self):
         """Test invalidation with preservation."""
         result = InvalidationResult(
             memory_id="mem_001",
-            status="historical",
+            status=InvalidationStatus.HISTORICAL,
             reasoning="Outdated but useful context",
             confidence=0.85,
             preserve_as="historical_context",
         )
 
         assert result.memory_id == "mem_001"
-        assert result.status == "historical"
+        assert result.status == InvalidationStatus.HISTORICAL
         assert result.confidence == 0.85
         assert result.preserve_as == "historical_context"
 

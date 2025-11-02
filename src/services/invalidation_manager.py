@@ -18,7 +18,8 @@ from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, MemoryStatus
-from src.models.version import InvalidationResult
+from src.models.version import InvalidationResult, InvalidationStatus
+from src.services.memory_sync import MemorySyncManager
 
 
 class ValidationCheck(BaseModel):
@@ -52,6 +53,7 @@ class InvalidationManager:
         llm: LLMProvider,
         graph_store: GraphStore,
         vector_store: VectorStore,
+        sync_manager: MemorySyncManager | None = None,
     ):
         """
         Initialize invalidation manager.
@@ -60,10 +62,12 @@ class InvalidationManager:
             llm: LLM provider for semantic evaluation
             graph_store: Graph database
             vector_store: Vector database
+            sync_manager: Optional sync manager for atomic updates
         """
         self.llm = llm
         self.graph_store = graph_store
         self.vector_store = vector_store
+        self.sync_manager = sync_manager
 
         # Background worker task
         self._worker_task: asyncio.Task | None = None
@@ -102,7 +106,7 @@ class InvalidationManager:
         # Perform validation
         result = await self.check_invalidation(memory, current_context)
 
-        if result.status != "active":
+        if result.status != InvalidationStatus.ACTIVE:
             # Mark as invalidated
             memory = await self._mark_invalidated(memory, result)
 
@@ -269,7 +273,7 @@ class InvalidationManager:
             # Check invalidation
             result = await self.check_invalidation(memory, context)
 
-            if result.status != "active":
+            if result.status != InvalidationStatus.ACTIVE:
                 await self._mark_invalidated(memory, result)
             else:
                 # Update last_validated
@@ -306,17 +310,22 @@ class InvalidationManager:
                 continue
 
             # Ask LLM: Does new memory supersede this one?
-            prompt = f"""
+            current_dt = datetime.now()
+
+            prompt = f"""[CURRENT DATE/TIME: {current_dt.strftime('%Y-%m-%d %H:%M:%S')}]
+
 Analyze if a new memory supersedes an existing one.
 
 Existing Memory:
 Content: {candidate.content}
-Created: {candidate.created_at}
+Created: {candidate.created_at.strftime('%Y-%m-%d %H:%M:%S')}
 Status: {candidate.status.value}
 
 New Memory:
 Content: {new_memory.content}
-Created: {new_memory.created_at}
+Created: {new_memory.created_at.strftime('%Y-%m-%d %H:%M:%S')}
+
+Important: Use the CURRENT DATE/TIME above as your reference point for temporal ordering.
 
 Does the new memory:
 1. Update/correct the existing memory? (action: "supersede")
@@ -351,7 +360,12 @@ Respond with JSON:
                     candidate.superseded_by = new_memory.id
                     candidate.invalidation_reason = result.reasoning
 
+                    # Update graph store first
                     await self.graph_store.update_node(candidate)
+
+                    # Sync supersession to vector store if sync manager available
+                    if self.sync_manager:
+                        await self.sync_manager.sync_memory_supersession(candidate)
 
                     superseded.append(candidate)
 
@@ -375,26 +389,30 @@ Respond with JSON:
         Returns:
             Invalidation result with status and reasoning
         """
-        prompt = f"""
+        current_dt = datetime.now()
+
+        prompt = f"""[CURRENT DATE/TIME: {current_dt.strftime('%Y-%m-%d %H:%M:%S')}]
+
 Analyze this memory for relevance and validity.
 
 Memory:
 Content: {memory.content}
-Created: {memory.created_at}
-Last accessed: {memory.last_accessed}
+Created: {memory.created_at.strftime('%Y-%m-%d %H:%M:%S')} ({memory.age_days()} days ago)
+Last accessed: {memory.last_accessed.strftime('%Y-%m-%d %H:%M:%S') if memory.last_accessed else 'Never'}
 Access count: {memory.access_count}
 Age: {memory.age_days()} days
 
 {f"Context: {context}" if context else ""}
 
+Important: Use the CURRENT DATE/TIME above as your reference point for all temporal reasoning.
+
 Determine if this memory is:
 1. "active" - Still accurate and relevant
 2. "historical" - Outdated but useful as historical context
-3. "superseded" - Replaced by newer information
-4. "invalidated" - No longer needed
+3. "invalidated" - No longer needed
 
 Respond with JSON:
-- status: active|historical|superseded|invalidated
+- status: active|historical|invalidated
 - reasoning: Explain your decision
 - confidence: 0.0-1.0 confidence in this assessment
 """
@@ -405,10 +423,9 @@ Respond with JSON:
 
         return InvalidationResult(
             memory_id=memory.id,
-            status=result.status,
+            status=InvalidationStatus(result.status),
             reasoning=result.reasoning,
             confidence=result.confidence,
-            superseded_by=result.superseded_by,
         )
 
     async def _mark_invalidated(self, memory: Memory, result: InvalidationResult) -> Memory:
@@ -429,10 +446,12 @@ Respond with JSON:
         memory.metadata["invalidated_at"] = datetime.now().isoformat()
         memory.updated_at = datetime.now()
 
-        if result.superseded_by:
-            memory.superseded_by = result.superseded_by
-
+        # Update graph store first
         await self.graph_store.update_node(memory)
+
+        # Sync invalidation state to vector store if sync manager available
+        if self.sync_manager:
+            await self.sync_manager.sync_memory_invalidation(memory)
 
         return memory
 

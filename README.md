@@ -2,26 +2,29 @@
 
 **An LLM-Native Memory System with Intelligent Relationship Extraction**
 
-MnemoGraph is a production-ready memory management system that leverages Large Language Models (LLMs) to understand and connect information like a human would. It combines vector embeddings for semantic search with LLM-powered relationship inference to create a rich, contextually-aware knowledge network with intelligent memory evolution and invalidation.
+MnemoGraph is an experimental memory management system that leverages Large Language Models (LLMs) to understand and connect information like a human would. It combines vector embeddings for semantic search with LLM-powered relationship inference to create a rich, contextually-aware knowledge network.
+
+> **⚠️ Development Status**: MnemoGraph is under active development. Features are being tested and refined. Contributions and feedback are welcome as we continue to improve the system.
 
 ---
 
-## ✨ Features
+## ✨ Current Features
 
 ### 🎯 Core Capabilities
 
-- **🤖 LLM-Native Architecture**: All relationship extraction powered by LLMs for human-like understanding
-- **📝 Intelligent Memory Management**: Store, retrieve, update memories with automatic versioning
-- **🔍 Multi-Stage Context Filtering**: Efficient pipeline scales from millions to relevant context
+- **🤖 LLM-Native Architecture**: Relationship extraction powered by LLMs for human-like understanding
+- **📝 Memory Management**: Store, retrieve, and update memories with metadata tracking
+- **🔄 Dual-Store Architecture**: Graph store (Neo4j) for relationships, vector store (Qdrant) for semantic search
+- **🔍 Multi-Stage Context Filtering**: Efficient pipeline from millions of candidates to relevant context
 - **🕸️ 13 Relationship Types**: Comprehensive relationship extraction in a single LLM call
-- **🧬 Memory Evolution**: Smart versioning with update detection, supersession, and rollback
-- **♻️ Semantic Invalidation**: LLM-based relevance checking instead of mathematical decay
-- **� Derived Insights**: Automatic pattern recognition and insight generation
+- **🧬 Memory Evolution**: Change detection, supersession tracking, and history preservation
+- **♻️ Semantic Invalidation**: LLM-based relevance checking for memory lifecycle management
+- **💡 Derived Insights**: Pattern recognition across related memories
 - **⚡ FastAPI Interface**: REST API with automatic OpenAPI documentation
 
 ### 🔗 Relationship Types (LLM-Extracted)
 
-MnemoGraph uses LLMs to extract 13 types of relationships in a single inference:
+MnemoGraph extracts 13 types of relationships in a single LLM inference:
 
 | Type             | Description                  | Example                                                  |
 | ---------------- | ---------------------------- | -------------------------------------------------------- |
@@ -57,10 +60,20 @@ MnemoGraph uses LLMs to extract 13 types of relationships in a single inference:
 │                 │            │                  │
 │ 1M→100 (Vector) │            │ • CRUD ops       │
 │ 100→50 (Hybrid) │            │ • Search         │
-│ 50→20 (LLM)     │            │ • Versioning     │
+│ 50→20 (LLM)     │            │ • Evolution      │
 └────────┬────────┘            └─────────┬────────┘
          │                               │
-         └───────────┬───────────────────┘
+         ┌───────────┬───────────────────┘
+                     │
+         ┌───────────┴───────────┐
+         │   Memory Sync Manager │
+         │   (Consistency Layer) │
+         │                       │
+         │ • Retry logic         │
+         │ • Validation          │
+         │ • Batch operations    │
+         │ • Repair mechanism    │
+         └───────────┬───────────┘
                      │
          ┌───────────┴───────────┐
          │                       │
@@ -79,7 +92,7 @@ MnemoGraph uses LLMs to extract 13 types of relationships in a single inference:
       │      Supporting Services         │
       ├──────────────────────────────────┤
       │ • Memory Evolution               │
-      │   (Versioning, Updates, Rollback)│
+      │   (Change detection, history)    │
       │                                  │
       │ • Invalidation Manager           │
       │   (LLM-based relevance checking) │
@@ -90,6 +103,16 @@ MnemoGraph uses LLMs to extract 13 types of relationships in a single inference:
 ```
 
 ### Key Components
+
+#### 🔄 Memory Sync Manager
+
+Synchronization layer between graph and vector stores:
+
+- **Automatic retry logic**: Multiple attempts with exponential backoff for transient failures
+- **Consistency validation**: Detects and reports sync mismatches between stores
+- **Repair mechanism**: Automatically fixes inconsistencies (graph = source of truth)
+- **Batch operations**: Efficient bulk sync with partial failure handling
+- **Embedding retrieval**: Combines graph metadata with vector embeddings during repair
 
 #### 🤖 LLM Relationship Engine
 
@@ -106,92 +129,24 @@ Efficient pipeline that scales to millions of memories:
 2. **Stage 2 - Hybrid Filtering** (50-100ms): Temporal, graph, entity, conversation context
 3. **Stage 3 - LLM Pre-filter** (200-500ms): 50 → 20 most relevant via fast LLM
 
-Saves 80-90% on LLM costs by filtering before expensive relationship extraction.
+Reduces LLM costs by filtering before expensive relationship extraction.
 
 #### 🧬 Memory Evolution Service
 
-- **Smart versioning**: LLM determines update vs augment vs replace
-- **Version chains**: Complete history with parent-child links
-- **Time-travel queries**: Access memories as of any point in time
-- **Rollback support**: Restore previous versions
+- **Change detection**: LLM determines update vs augment vs replace
+- **History tracking**: Complete history with parent-child links
+- **Supersession handling**: Tracks when memories replace older information
+- **Time-based queries**: Access memories from specific time periods
 
 #### ♻️ Invalidation Manager
 
-Three validation strategies (no mathematical decay):
+Three validation strategies:
 
 1. **On-demand (lazy)**: Check on access based on age/access patterns
 2. **Proactive (background)**: Periodic worker validates old/inactive memories
 3. **Event-driven**: New memories trigger supersession checks
 
-All decisions made by LLM semantic analysis, not formulas.
-
----
-
-## 🌟 What's New in V2?
-
-**MnemoGraph V2** represents a complete architectural redesign around LLMs:
-
-### 🎯 From Rule-Based to LLM-Native
-
-**V1 (Old):** Multiple specialized engines with hand-crafted algorithms
-
-- ❌ Semantic similarity engine (cosine threshold)
-- ❌ Temporal engine (time window + similarity)
-- ❌ Hierarchical engine (K-means clustering)
-- ❌ Entity co-occurrence (spaCy NER)
-- ❌ Sequential engine (conversation threading)
-
-**V2 (New):** Single LLM call understands context like a human
-
-- ✅ **One inference extracts all 13 relationship types**
-- ✅ **LLM understands semantic nuance** (not just cosine similarity)
-- ✅ **Contextual reasoning** ("why" not just "what")
-- ✅ **Adaptive to domain** (no manual threshold tuning)
-
-### ⚡ Performance & Scalability
-
-**Multi-Stage Filtering Pipeline:**
-
-```
-Before: Process all memories with expensive operations
-After:  1M memories → 100 → 50 → 20 (only 20 sent to LLM)
-Result: 80-90% cost reduction, 10x faster
-```
-
-**Parallel Operations:**
-
-- Vector store, graph store, and LLM operations run simultaneously
-- 40-60% latency reduction
-
-### 🧬 Intelligent Memory Lifecycle
-
-**Memory Evolution:**
-
-- LLM analyzes updates and decides: update/augment/replace/preserve
-- Complete version history with rollback support
-- Time-travel queries (access memories as of any date)
-
-**Semantic Invalidation:**
-
-- No more mathematical decay formulas
-- LLM evaluates: "Is this memory still relevant/accurate?"
-- Three strategies: on-demand, proactive (background), event-driven
-
-### 💡 Auto-Generated Insights
-
-**Derived Memories:**
-
-- LLM recognizes patterns across memories
-- Automatically creates synthesis nodes
-- Example: "User is learning Python async programming" derived from multiple queries
-
-### 🎨 Design Principles
-
-1. **LLM-First**: Use LLMs for understanding, not just generation
-2. **Cost-Conscious**: Multi-stage filtering minimizes expensive operations
-3. **Production-Ready**: Real validation, error handling, parallel execution
-4. **Configurable**: Tune for accuracy vs speed vs cost
-5. **Observable**: Detailed logging and performance metrics
+All decisions made by LLM semantic analysis.
 
 ---
 
@@ -233,15 +188,39 @@ docker compose up -d
 # Wait ~30 seconds for Ollama to initialize and pull models
 ```
 
-4. **Configure (optional):**
+4. **Configure environment:**
 
-To use OpenAI instead of Ollama, edit `src/config.py`:
+Create a `.env` file or `config.yml` in the project root:
 
-```python
-config = Config(
-    llm=LLMConfig(provider="openai", model="gpt-4o-mini", api_key="your-key"),
-    embedder=EmbedderConfig(provider="openai", model="text-embedding-3-small", api_key="your-key")
-)
+```bash
+# .env file example
+LLM_PROVIDER=ollama  # or openai
+LLM_MODEL=llama3.1:8b  # or gpt-4o-mini
+EMBEDDER_PROVIDER=ollama  # or openai
+EMBEDDER_MODEL=nomic-embed-text  # or text-embedding-3-small
+
+# If using OpenAI
+OPENAI_API_KEY=your-openai-api-key
+
+# Ollama settings (if using local Ollama)
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+Or configure via `config.yml`:
+
+```yaml
+llm:
+  provider: ollama # or openai
+  model: llama3.1:8b
+  base_url: http://localhost:11434
+
+embedder:
+  provider: ollama # or openai
+  model: nomic-embed-text
+
+# Add OpenAI API key if using OpenAI
+openai:
+  api_key: your-openai-api-key
 ```
 
 5. **Start the API server:**
@@ -265,7 +244,7 @@ The system provides a high-level Python API for managing memories:
 
 - **Add memories** with automatic relationship extraction
 - **Search memories** using semantic similarity
-- **Update memories** with intelligent versioning
+- **Update memories** with intelligent change detection
 - **Track memory evolution** over time
 - **Validate memory relevance** using LLM analysis
 
@@ -279,7 +258,7 @@ Access MnemoGraph through a RESTful API with automatic OpenAPI documentation at 
 
 - **Add memories** with metadata and automatic relationship inference
 - **Search** using natural language queries with configurable filters
-- **Update/evolve** memories with LLM-guided versioning
+- **Update/evolve** memories with LLM-guided change detection
 - **Version history** access for any memory
 - **Graph traversal** to explore related memories
 - **Health monitoring** and system statistics
@@ -292,17 +271,18 @@ All endpoints support JSON request/response formats with comprehensive validatio
 
 ### Core Endpoints
 
-| Method   | Endpoint                   | Description                                               |
-| -------- | -------------------------- | --------------------------------------------------------- |
-| `POST`   | `/memories`                | Add a new memory (with automatic relationship extraction) |
-| `GET`    | `/memories/{id}`           | Get a specific memory (with optional validation)          |
-| `PUT`    | `/memories/{id}`           | Update or evolve a memory                                 |
-| `DELETE` | `/memories/{id}`           | Delete a memory                                           |
-| `POST`   | `/memories/search`         | Semantic search with relationships                        |
-| `GET`    | `/memories/{id}/history`   | Get version history for a memory                          |
-| `GET`    | `/memories/{id}/neighbors` | Get related memories via graph                            |
-| `GET`    | `/stats`                   | System statistics                                         |
-| `GET`    | `/health`                  | Health check                                              |
+| Method   | Endpoint           | Description                                            |
+| -------- | ------------------ | ------------------------------------------------------ |
+| `POST`   | `/memories`        | Add a new memory with automatic relationship inference |
+| `GET`    | `/memories/{id}`   | Get a specific memory with optional relationships      |
+| `PUT`    | `/memories/{id}`   | Update memory with LLM-guided versioning               |
+| `DELETE` | `/memories/{id}`   | Delete a memory and its relationships                  |
+| `POST`   | `/memories/search` | Semantic search with optional relationship information |
+| `POST`   | `/conversations`   | Add conversation with sequential linking (coming soon) |
+| `POST`   | `/documents`       | Add document with automatic chunking (coming soon)     |
+| `GET`    | `/stats`           | System statistics                                      |
+| `GET`    | `/health`          | Health check                                           |
+| `GET`    | `/`                | API information and documentation links                |
 
 ### Interactive Documentation
 
@@ -327,9 +307,6 @@ pytest tests/ -v
 
 # Run with coverage report
 pytest tests/ --cov=src --cov-report=html
-
-# Current status: 70/72 tests passing (97.2% pass rate)
-# Coverage: 79% (target: 85%)
 ```
 
 ### Run Specific Test Suites
@@ -347,32 +324,37 @@ pytest tests/test_invalidation_manager.py -v
 # Context filter tests
 pytest tests/test_context_filter.py -v
 
+# Memory sync manager tests
+pytest tests/services/test_memory_sync.py -v
+
 # Neo4j graph store tests (requires Neo4j running)
 pytest tests/ -v -m neo4j
 ```
 
 ### Test Coverage
 
-✅ **Fully Tested:**
+**Tested Components:**
 
 - LLM relationship extraction (13 relationship types)
 - Multi-stage context filtering (3 stages)
 - Memory evolution (update, augment, replace, preserve)
 - Semantic invalidation (on-demand, proactive, event-driven)
+- Memory sync manager (retry, validation, repair, batch ops)
 - Vector store (Qdrant integration)
 - Graph store (Neo4j)
 - LLM providers (Ollama & OpenAI)
 - Embedders (Ollama & OpenAI)
 
-📊 **Coverage by Module:**
+**Coverage by Module:**
 
-- `llm_relationship_engine.py`: 85%
-- `memory_evolution.py`: 82%
-- `context_filter.py`: 74%
-- `invalidation_manager.py`: 62%
-- `memory_engine.py`: 88%
+- `llm_relationship_engine.py`
+- `memory_sync.py`
+- `memory_evolution.py`
+- `memory_engine.py`
+- `context_filter.py`
+- `invalidation_manager.py`
 
-**Note:** Tests use real LLM implementations (Ollama llama3.1:8b) for integration testing, not mocks.
+**Note:** Tests use real LLM implementations for integration testing. Sync manager tests use real Neo4j and Qdrant stores.
 
 ---
 
@@ -457,17 +439,6 @@ qdrant=QdrantConfig(
 
 ## 📊 Performance
 
-### Benchmarks (with Ollama llama3.1:8b)
-
-| Operation             | Time       | Notes                                                                      |
-| --------------------- | ---------- | -------------------------------------------------------------------------- |
-| **Add Memory**        | 1.5-3s     | Includes: embedding generation, LLM relationship extraction, graph storage |
-| **Context Filtering** | 300-500ms  | Multi-stage pipeline: 1M → 100 → 50 → 20 candidates                        |
-| **Semantic Search**   | 50-150ms   | Vector search only (without relationship extraction)                       |
-| **Get Memory**        | 20-50ms    | Simple retrieval with optional validation                                  |
-| **Memory Evolution**  | 500-1000ms | LLM analysis + version creation                                            |
-| **Validation Check**  | 300-600ms  | LLM-based relevance assessment                                             |
-
 ### Scalability
 
 **Multi-Stage Filter Performance:**
@@ -476,7 +447,7 @@ qdrant=QdrantConfig(
 - Stage 2 (Hybrid): 50-100ms (temporal, graph, entity filtering)
 - Stage 3 (LLM): 200-500ms (50 → 20 most relevant)
 
-**Cost Optimization:**
+**Optimization Strategies:**
 
 - LLM pre-filtering reduces extraction costs by 80-90%
 - Vector quantization reduces memory usage by 75%
@@ -491,127 +462,155 @@ qdrant=QdrantConfig(
 - **Graph Store**: [Neo4j](https://neo4j.com/) - Relationship storage and traversal
 - **Embeddings**: [Ollama](https://ollama.ai/) (nomic-embed-text) or [OpenAI](https://openai.com/) (text-embedding-3-small)
 - **API Framework**: [FastAPI](https://fastapi.tiangolo.com/) - Modern, fast web framework
-- **Testing**: [pytest](https://pytest.org/) - Comprehensive test suite with 97% pass rate
+- **Testing**: [pytest](https://pytest.org/) - Comprehensive test suite
 
 ---
 
-## 🗺️ Roadmap
+## 🗺️ Development Roadmap
 
-### ✅ Completed (V2 - LLM-Native)
+### ✅ Current Progress
+
+**Core Infrastructure:**
 
 - ✅ LLM-native relationship extraction (13 types in single call)
-- ✅ Multi-stage context filtering (1M+ memories → relevant context)
-- ✅ Memory evolution with smart versioning
-- ✅ LLM-based semantic invalidation (no mathematical decay)
-- ✅ Derived insights and pattern recognition
+- ✅ Multi-stage context filtering (vector → hybrid → LLM)
+- ✅ Dual-store architecture (Neo4j + Qdrant)
+- ✅ Memory sync manager with retry and validation
+- ✅ FastAPI interface with OpenAPI docs
+
+**Memory Management:**
+
+- ✅ Memory evolution with change detection
+- ✅ LLM-based semantic invalidation
 - ✅ Event-driven supersession detection
-- ✅ Time-travel queries and version rollback
-- ✅ Parallel operations and optimization
-- ✅ Comprehensive test suite (70/72 tests passing)
-- ✅ Production-ready FastAPI interface
-- ✅ Support for Ollama and OpenAI
+- ✅ History preservation and tracking
+- ✅ Derived insights from patterns
 
-### 🚧 In Progress
+**Testing & Quality:**
 
-- [ ] **Enhanced Validation**: More sophisticated background worker strategies
-- [ ] **Clustering**: LLM-based memory clustering and topic extraction
-- [ ] **Performance**: Caching layer for repeated queries
+- ✅ Integration tests with real LLM/stores
+- ✅ Comprehensive test coverage across modules
+- ✅ Support for both Ollama and OpenAI
+
+### 🚧 Active Development
+
+**Performance & Reliability:**
+
+- 🔨 Enhanced error handling and recovery mechanisms
+- 🔨 Caching layer for repeated queries
+- 🔨 Background worker optimization for invalidation checks
+- 🔨 Batch operation improvements
+- 🔨 Query performance optimization
+
+**Testing & Documentation:**
+
+- 🔨 Increase test coverage across all modules
+- 🔨 Add more real-world usage examples
+- 🔨 Performance benchmarking suite
+- 🔨 API usage documentation
+
+**Features:**
+
+- 🔨 Advanced graph traversal algorithms
+- 🔨 Memory consolidation strategies
+- 🔨 Enhanced clustering capabilities
 
 ### 🔮 Future Plans
 
-- [ ] **Multi-modal memories**: Support for images, audio, video
-- [ ] **Graph algorithms**: Community detection, path finding, centrality
-- [ ] **Memory consolidation**: Periodic "sleep" cycles to merge similar memories
-- [ ] **Attention mechanisms**: Importance scoring based on access patterns
-- [ ] **Interactive visualization**: Web UI for graph exploration
-- [ ] **Batch processing**: Optimized bulk operations
-- [ ] **Export/Import**: Backup and restore functionality
-- [ ] **Advanced analytics**: Memory network analysis and insights
-- [ ] **Streaming API**: Real-time memory updates via WebSocket
-- [ ] **Collaborative memories**: Multi-user shared memory spaces
+**Advanced Features:**
+
+- [ ] Multi-modal memory support (images, audio, video)
+- [ ] Interactive graph visualization UI
+- [ ] Collaborative memory spaces (multi-user)
+- [ ] Streaming API via WebSocket
+- [ ] Advanced analytics and insights dashboard
+
+**Scalability:**
+
+- [ ] Distributed processing for large-scale deployments
+- [ ] Advanced caching strategies
+- [ ] Query optimization for massive graphs
+- [ ] Partitioning strategies for horizontal scaling
+
+**Integration:**
+
+- [ ] Additional LLM provider support (Anthropic, Cohere, etc.)
+- [ ] Plugin system for custom relationship types
+- [ ] Export/import functionality
+- [ ] Backup and restore mechanisms
+
+**Intelligence:**
+
+- [ ] Attention mechanisms for importance scoring
+- [ ] Periodic "consolidation" cycles
+- [ ] Automatic memory clustering and topic extraction
+- [ ] Conflict resolution strategies
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+MnemoGraph is an open-source project and we welcome contributions from the community! Whether you're fixing bugs, adding features, improving documentation, or sharing feedback, your help is appreciated.
 
 ### 🎯 Priority Areas
 
-We're especially interested in contributions for:
+We're particularly interested in contributions for:
 
-1. **Performance Optimization**
+### 🎯 Priority Areas
 
-   - Caching strategies for repeated queries
-   - Parallel processing improvements
-   - Database query optimization
+**Performance Optimization:**
 
-2. **LLM Integration**
+- Caching strategies for repeated queries
+- Parallel processing improvements
+- Database query optimization
+- Batch operation enhancements
 
-   - Support for additional LLM providers (Anthropic, Cohere, etc.)
-   - Prompt engineering improvements
-   - Cost optimization strategies
+**LLM Integration:**
 
-3. **Advanced Features**
+- Support for additional LLM providers (Anthropic, Cohere, etc.)
+- Prompt engineering improvements
+- Cost optimization strategies
+- Multi-modal embedding support
 
-   - Clustering algorithms (HDBSCAN, LLM-based)
-   - Graph visualization components
-   - Multi-modal memory support
+**Advanced Features:**
 
-4. **Testing & Documentation**
-   - Increase test coverage (current: 79%, target: 85%)
-   - Real-world usage examples
-   - Performance benchmarks
+- Graph visualization components
+- Memory clustering algorithms
+- Advanced relationship inference
+- Pattern recognition improvements
 
-### Known Limitations
+**Testing & Quality:**
 
-This is a **PoC V2** with known areas for improvement:
+- Increase test coverage
+- Real-world usage examples
+- Performance benchmarks
+- Integration test scenarios
 
-#### Performance
+**Documentation:**
 
-- **LLM latency**: 1-3s per memory addition (optimization: use faster models, caching)
-- **Context filtering**: Stage 3 LLM pre-filter can be slow with 50+ candidates
-- **Batch operations**: No optimized bulk memory insertion yet
+- API usage guides
+- Architecture deep-dives
+- Performance tuning guides
+- Troubleshooting documentation
 
-#### LLM Behavior
+### 💡 How You Can Help
 
-- **Prompt sensitivity**: Relationship extraction quality varies by LLM model
-- **Confidence calibration**: Confidence scores may need per-model tuning
-- **Edge cases**: Uncommon relationship patterns may be missed
+1. **Report Issues**: Found a bug or have a feature request? [Open an issue](https://github.com/vakharwalad23/mnemograph/issues)
+2. **Improve Documentation**: Help make the docs clearer and more comprehensive
+3. **Add Tests**: Help increase coverage and test edge cases
+4. **Optimize Performance**: Profile and improve bottlenecks
+5. **Share Use Cases**: Tell us how you're using MnemoGraph
+6. **Submit Pull Requests**: Fix bugs, add features, or improve code quality
 
-#### Scalability
+### 📋 Contribution Guidelines
 
-- **Vector quantization**: int8 quantization trades accuracy for storage (configurable)
-- **Background validation**: Worker may need tuning for millions of memories
+- Fork the repository and create a new branch for your feature
+- Write tests for new functionality
+- Follow the existing code style and conventions
+- Update documentation as needed
+- Submit a pull request with a clear description of changes
 
-#### Feature Gaps
-
-- **No clustering yet**: Memory clustering/topic detection planned but not implemented
-- **Limited analytics**: No built-in graph analysis tools (centrality, communities, etc.)
-- **No UI**: Command-line/API only (web UI planned)
-
-**Want to help?** Pick any of these areas and submit a PR! We maintain:
-
-- Comprehensive test suite (70/72 passing)
-- Type hints throughout
-- Detailed docstrings
-- Configuration-driven design
-
-### Development Setup
-
-```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest tests/ -v
-
-# Run linting
-ruff check src/ tests/
-
-# Format code
-ruff format src/ tests/
-```
+For major changes, please open an issue first to discuss what you'd like to change.
 
 ---
 
@@ -629,36 +628,34 @@ MIT License - see LICENSE file for details
 - Graph storage using Neo4j
 - Thanks to the open-source AI/ML community
 
-### Key Insights
+### Design Philosophy
 
-MnemoGraph V2 is built on these principles:
+MnemoGraph is built on these principles:
 
-1. **LLMs understand context better than algorithms**: A single LLM call with rich context outperforms multiple specialized engines with hand-tuned thresholds.
+1. **LLMs understand context better than algorithms**: A single LLM call with rich context can outperform multiple specialized engines with hand-tuned thresholds.
 
 2. **Filter before processing**: Multi-stage filtering (1M → 100 → 50 → 20) makes LLM-based processing practical at scale.
 
-3. **Semantic invalidation beats decay formulas**: "Is this still relevant?" is a question LLMs can answer better than mathematical decay.
+3. **Semantic invalidation over decay formulas**: "Is this still relevant?" is a question LLMs can answer more intelligently than mathematical decay functions.
 
-4. **Relationships need reasoning**: Knowing _why_ a relationship exists is as important as knowing _what_ type it is.
+4. **Relationships need reasoning**: Understanding _why_ a relationship exists is as important as knowing _what_ type it is.
 
-5. **Memory is evolutionary, not static**: Track changes over time, understand updates, preserve history.
+5. **Memory evolves, it doesn't just accumulate**: Track changes over time, understand updates, preserve history.
 
 ---
 
 ## 📧 Contact
 
-For questions, issues, or suggestions:
+For questions or discussions about the project:
 
-- **GitHub Issues**: [Report bugs or request features](https://github.com/vakharwalad23/mnemograph/issues)
-- **Discussions**: [Ask questions or share ideas](https://github.com/vakharwalad23/mnemograph/discussions)
+- **GitHub**: [vakharwalad23/mnemograph](https://github.com/vakharwalad23/mnemograph)
 
 <div align="center">
 
-**MnemoGraph V2** - _LLM-Native Memory System_ 🧠✨
+**MnemoGraph** - _LLM-Native Memory System_ 🧠✨
 
-[![Tests](https://img.shields.io/badge/tests-70%2F72%20passing-brightgreen)]()
-[![Coverage](https://img.shields.io/badge/coverage-79%25-yellow)]()
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
+[![Status](https://img.shields.io/badge/status-in%20development-yellow)]()
 
 </div>
