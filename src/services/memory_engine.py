@@ -424,11 +424,11 @@ class MemoryEngine:
         if not memory:
             raise ValueError(f"Memory not found: {memory_id}")
 
-        from src.models.version import InvalidationResult
+        from src.models.version import InvalidationResult, InvalidationStatus
 
         result = InvalidationResult(
             memory_id=memory_id,
-            status="invalidated",
+            status=InvalidationStatus.INVALIDATED,
             reasoning=reason,
             confidence=1.0,
         )

@@ -18,7 +18,7 @@ from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, MemoryStatus
-from src.models.version import InvalidationResult
+from src.models.version import InvalidationResult, InvalidationStatus
 from src.services.memory_sync import MemorySyncManager
 
 
@@ -106,7 +106,7 @@ class InvalidationManager:
         # Perform validation
         result = await self.check_invalidation(memory, current_context)
 
-        if result.status != "active":
+        if result.status != InvalidationStatus.ACTIVE:
             # Mark as invalidated
             memory = await self._mark_invalidated(memory, result)
 
@@ -273,7 +273,7 @@ class InvalidationManager:
             # Check invalidation
             result = await self.check_invalidation(memory, context)
 
-            if result.status != "active":
+            if result.status != InvalidationStatus.ACTIVE:
                 await self._mark_invalidated(memory, result)
             else:
                 # Update last_validated
@@ -409,11 +409,10 @@ Important: Use the CURRENT DATE/TIME above as your reference point for all tempo
 Determine if this memory is:
 1. "active" - Still accurate and relevant
 2. "historical" - Outdated but useful as historical context
-3. "superseded" - Replaced by newer information
-4. "invalidated" - No longer needed
+3. "invalidated" - No longer needed
 
 Respond with JSON:
-- status: active|historical|superseded|invalidated
+- status: active|historical|invalidated
 - reasoning: Explain your decision
 - confidence: 0.0-1.0 confidence in this assessment
 """
@@ -424,10 +423,9 @@ Respond with JSON:
 
         return InvalidationResult(
             memory_id=memory.id,
-            status=result.status,
+            status=InvalidationStatus(result.status),
             reasoning=result.reasoning,
             confidence=result.confidence,
-            superseded_by=result.superseded_by,
         )
 
     async def _mark_invalidated(self, memory: Memory, result: InvalidationResult) -> Memory:
@@ -447,9 +445,6 @@ Respond with JSON:
         memory.metadata["invalidation_confidence"] = result.confidence
         memory.metadata["invalidated_at"] = datetime.now().isoformat()
         memory.updated_at = datetime.now()
-
-        if result.superseded_by:
-            memory.superseded_by = result.superseded_by
 
         # Update graph store first
         await self.graph_store.update_node(memory)

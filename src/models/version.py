@@ -3,9 +3,18 @@ Version tracking models for memory evolution.
 """
 
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+class InvalidationStatus(str, Enum):
+    """Valid statuses for memory invalidation."""
+
+    ACTIVE = "active"
+    HISTORICAL = "historical"
+    INVALIDATED = "invalidated"
 
 
 class VersionChange(BaseModel):
@@ -56,9 +65,9 @@ class InvalidationResult(BaseModel):
     model_config = {"extra": "ignore"}
 
     memory_id: str = Field(..., description="REQUIRED: The ID of the memory being checked")
-    status: str = Field(
+    status: InvalidationStatus = Field(
         ...,
-        description="REQUIRED: The determined status. Must be exactly one of: 'active', 'historical', 'superseded', or 'invalidated'",
+        description="REQUIRED: The determined status for this memory",
     )
     reasoning: str = Field(
         ...,
@@ -69,10 +78,6 @@ class InvalidationResult(BaseModel):
         ge=0.0,
         le=1.0,
         description="REQUIRED: Confidence score between 0.0 and 1.0. Higher values mean more certain about the invalidation decision.",
-    )
-    superseded_by: str | None = Field(
-        default=None,
-        description="OPTIONAL: If status is 'superseded', provide the ID of the memory that supersedes this one",
     )
     preserve_as: str | None = Field(
         default=None,

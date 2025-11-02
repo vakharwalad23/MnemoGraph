@@ -192,7 +192,7 @@ New Information:
 {new_info}
 
 Determine the best action:
-1. "update" - New info corrects/updates the current memory (create new version)
+1. "update" - New info updates the current memory (create new version)
 2. "augment" - New info adds details without contradicting (append to existing)
 3. "replace" - New info completely replaces the memory (create new version)
 4. "preserve" - New info contradicts; both should be kept as separate memories
