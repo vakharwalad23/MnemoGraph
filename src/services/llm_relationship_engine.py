@@ -208,47 +208,43 @@ IMPORTANT: Do NOT combine types with slashes (e.g., "REFERENCES/MENTIONS"). Use 
    - Use when: New information modifies or corrects previous content
    - Note the specific changes made
 
-3. **SUPERSEDES**: One memory completely replaces another
-   - Use when: New memory makes old one obsolete
-   - Consider if old version should be preserved as historical context
-
-4. **CONTRADICTS**: Conflicting information between memories
+3. **CONTRADICTS**: Conflicting information between memories
    - Use when: Memories contain incompatible facts or statements
    - Note if both could be valid in different contexts
 
-5. **FOLLOWS**: Temporal or logical sequence (this comes after that)
+4. **FOLLOWS**: Temporal or logical sequence (this comes after that)
    - Use when: This memory follows another in time or causality
    - Explain why ordering matters
 
-6. **PRECEDES**: Temporal or logical sequence (this comes before that)
+5. **PRECEDES**: Temporal or logical sequence (this comes before that)
    - Use when: This memory comes before another in time or causality
    - Note the time gap significance
 
-7. **PART_OF**: Hierarchical containment (this is part of that)
+6. **PART_OF**: Hierarchical containment (this is part of that)
    - Use when: Memory belongs to a larger category or topic
    - Specify the containment relationship
 
-8. **BELONGS_TO**: Category membership (this belongs to that group)
+7. **BELONGS_TO**: Category membership (this belongs to that group)
    - Use when: Memory is a member of a broader category
    - Identify the abstraction level
 
-9. **REQUIRES**: Prerequisite dependency (this needs that first)
+8. **REQUIRES**: Prerequisite dependency (this needs that first)
    - Use when: Understanding this memory requires knowledge from another
    - Explain the dependency
 
-10. **DEPENDS_ON**: Depends on another memory for context
+9. **DEPENDS_ON**: Depends on another memory for context
     - Use when: This memory relies on context from another
     - Clarify the dependency relationship
 
-11. **REFERENCES**: Direct reference or citation
+10. **REFERENCES**: Direct reference or citation
     - Use when: Memory explicitly references another memory
     - Note the context of reference
 
-12. **MENTIONS**: Casual mention of related content
+11. **MENTIONS**: Casual mention of related content
     - Use when: Memory briefly mentions related information
     - Describe how it's mentioned
 
-13. **DERIVED_FROM**: Synthesized or inferred from other memories
+12. **DERIVED_FROM**: Synthesized or inferred from other memories
     - Use when: This memory is a synthesis of multiple sources
     - List all source memories
 

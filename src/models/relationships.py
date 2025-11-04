@@ -22,7 +22,6 @@ class RelationshipType(str, Enum):
     PRECEDES = "PRECEDES"  # Comes before
     FOLLOWS = "FOLLOWS"  # Comes after
     UPDATES = "UPDATES"  # Updates/corrects
-    SUPERSEDES = "SUPERSEDES"  # Replaces
 
     # Hierarchical
     PART_OF = "PART_OF"  # Component of larger whole

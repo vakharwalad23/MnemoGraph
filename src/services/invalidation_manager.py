@@ -182,7 +182,7 @@ class InvalidationManager:
                 # Find memories that need validation
                 candidates = await self._find_validation_candidates()
 
-                print(f"   Found {len(candidates)} memories to validate")
+                print(f"Found {len(candidates)} memories to validate")
 
                 # Validate in batches
                 batch_size = 10
@@ -222,7 +222,7 @@ class InvalidationManager:
         """
         candidates = []
 
-        # Priority 1: Old, rarely accessed
+        # Priority: Old, rarely accessed
         try:
             old_inactive = await self.graph_store.query_memories(
                 filters={
@@ -236,24 +236,7 @@ class InvalidationManager:
         except Exception:
             pass  # Graph store may not support these queries yet
 
-        # Priority 2: Random sample (fallback)
-        try:
-            random_sample = await self.graph_store.get_random_memories(
-                filters={"status": MemoryStatus.ACTIVE.value}, limit=50
-            )
-            candidates.extend(random_sample)
-        except Exception:
-            pass
-
-        # Deduplicate
-        seen = set()
-        unique_candidates = []
-        for mem in candidates:
-            if mem.id not in seen:
-                seen.add(mem.id)
-                unique_candidates.append(mem)
-
-        return unique_candidates[:100]  # Limit to 100 per run
+        return candidates[:100]  # Limit to 100 per run
 
     async def _validate_candidate(self, memory: Memory):
         """

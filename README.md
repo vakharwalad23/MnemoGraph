@@ -18,7 +18,7 @@ MnemoGraph is an experimental memory management system that leverages Large Lang
 - **📝 Memory Management**: Store, retrieve, and update memories with metadata tracking
 - **🔄 Dual-Store Architecture**: Graph store (Neo4j) for relationships, vector store (Qdrant) for semantic search
 - **🔍 Multi-Stage Context Filtering**: Efficient pipeline from millions of candidates to relevant context
-- **🕸️ 13 Relationship Types**: Comprehensive relationship extraction in a single LLM call
+- **🕸️ 12 Relationship Types**: Comprehensive relationship extraction in a single LLM call
 - **🧬 Memory Evolution**: Change detection, supersession tracking, and history preservation
 - **♻️ Semantic Invalidation**: LLM-based relevance checking for memory lifecycle management
 - **💡 Derived Insights**: Pattern recognition across related memories
@@ -26,13 +26,12 @@ MnemoGraph is an experimental memory management system that leverages Large Lang
 
 ### 🔗 Relationship Types (LLM-Extracted)
 
-MnemoGraph extracts 13 types of relationships in a single LLM inference:
+MnemoGraph extracts 12 types of relationships in a single LLM inference:
 
 | Type             | Description                  | Example                                                  |
 | ---------------- | ---------------------------- | -------------------------------------------------------- |
 | **SIMILAR_TO**   | Semantically similar content | "Python async" ↔ "Python coroutines"                     |
 | **UPDATES**      | Information updates          | "Python 3.9 features" → "Python 3.10 features"           |
-| **SUPERSEDES**   | Complete replacement         | Old API docs → New API docs                              |
 | **CONTRADICTS**  | Conflicting information      | "Project deadline: Jan 10" ⚡ "Project deadline: Jan 15" |
 | **FOLLOWS**      | Temporal/logical sequence    | Message 1 → Message 2                                    |
 | **PRECEDES**     | Reverse temporal order       | Setup guide ← Installation guide                         |
@@ -51,7 +50,7 @@ MnemoGraph extracts 13 types of relationships in a single LLM inference:
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                    LLM Relationship Engine                        │
-│  (Single LLM call extracts all 13 relationship types)            │
+│  (Single LLM call extracts all 12 relationship types)            │
 └────────────────────────┬─────────────────────────────────────────┘
                          │
          ┌───────────────┴────────────────┐
@@ -118,7 +117,7 @@ Synchronization layer between graph and vector stores:
 
 #### 🤖 LLM Relationship Engine
 
-- **Single-call extraction**: All 13 relationship types in one LLM inference
+- **Single-call extraction**: All 12 relationship types in one LLM inference
 - **Parallel execution**: Simultaneous vector store + graph store operations
 - **Event-driven invalidation**: Automatic supersession detection
 - **Derived memories**: Creates insights from patterns across memories
@@ -337,7 +336,7 @@ pytest tests/ -v -m neo4j
 
 **Tested Components:**
 
-- LLM relationship extraction (13 relationship types)
+- LLM relationship extraction (12 relationship types)
 - Multi-stage context filtering (3 stages)
 - Memory evolution (update, augment, replace, preserve)
 - Semantic invalidation (on-demand, proactive, event-driven)
@@ -474,7 +473,7 @@ qdrant=QdrantConfig(
 
 **Core Infrastructure:**
 
-- ✅ LLM-native relationship extraction (13 types in single call)
+- ✅ LLM-native relationship extraction (12 types in single call)
 - ✅ Multi-stage context filtering (vector → hybrid → LLM)
 - ✅ Dual-store architecture (Neo4j + Qdrant)
 - ✅ Memory sync manager with retry and validation

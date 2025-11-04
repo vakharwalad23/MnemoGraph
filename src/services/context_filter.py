@@ -8,7 +8,6 @@ Pipeline:
 import asyncio
 import time
 from datetime import datetime, timedelta
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -199,27 +198,36 @@ Context Gathering Performance:
             "conversation": results[3] if not isinstance(results[3], Exception) else [],
         }
 
-    async def _temporal_filter(self, memory: Any, window_days: int = 30) -> list[Memory]:
+    async def _temporal_filter(self, memory: Memory, window_days: int = 30) -> list[Memory]:
         """
-        Get recent memories for temporal context.
+        Get recent memories that are semantically similar to the new memory.
+
+        Instead of just grabbing recent memories (pollution risk), this finds
+        recent memories that are ALSO similar to the new memory.
 
         Args:
             memory: Memory to get context for
             window_days: Time window in days
 
         Returns:
-            List of recent memories
+            List of recent, relevant memories
         """
         try:
             cutoff = datetime.now() - timedelta(days=window_days)
 
-            results = await self.graph_store.query_memories(
-                filters={"created_after": cutoff, "status": "active"},
-                order_by="created_at DESC",
+            # Use vector search with temporal filter
+            # This gets "recent memories about the same topic"
+            results = await self.vector_store.search_similar(
+                vector=memory.embedding,
                 limit=20,
+                filters={
+                    "status": ["active"],
+                    "created_after": cutoff.isoformat(),  # Last 30 days
+                },
+                score_threshold=0.4,  # Similarity > 0.4 (configurable)
             )
 
-            return results
+            return [r.memory for r in results] if results else []
 
         except Exception:
             return []
