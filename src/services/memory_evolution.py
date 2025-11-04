@@ -137,11 +137,19 @@ class MemoryEvolutionService:
         elif analysis.action == "augment":
             # Add to existing memory without versioning
             current.content = f"{current.content}\n\nUpdate: {new_info}"
+
+            # Generate new embedding
+            current.embedding = await self.embedder.embed(current.content)
+
             current.metadata["augmented"] = current.metadata.get("augmented", 0) + 1
             current.metadata["last_augment"] = datetime.now().isoformat()
             current.updated_at = datetime.now()
 
             await self.graph_store.update_node(current)
+
+            # Sync changes to vector store
+            if self.sync_manager:
+                await self.sync_manager.sync_memory_full(current)
 
             return MemoryEvolution(
                 current_version=current.id,
@@ -156,10 +164,37 @@ class MemoryEvolutionService:
             )
 
         else:  # preserve
-            # Keep both as separate memories (handled outside this method)
+            # Create new conflicting memory (both stay active)
+            from uuid import uuid4
+
+            new_memory_id = f"mem_{uuid4().hex[:12]}"
+            new_embedding = await self.embedder.embed(new_info)
+
+            new_memory = Memory(
+                id=new_memory_id,
+                content=new_info,
+                type=current.type,
+                embedding=new_embedding,
+                status=MemoryStatus.ACTIVE,
+                metadata={
+                    "preserve_alongside": current.id,
+                    "preservation_reason": analysis.reasoning,
+                    "conflict_description": analysis.change_description,
+                },
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+            )
+
+            # Add new memory to graph store
+            await self.graph_store.add_node(new_memory)
+
+            # Sync to vector store
+            if self.sync_manager:
+                await self.sync_manager.sync_memory_full(new_memory)
+
             return MemoryEvolution(
                 current_version=current.id,
-                new_version=None,
+                new_version=new_memory.id,
                 action="preserve",
                 change=VersionChange(
                     change_type="preserve",

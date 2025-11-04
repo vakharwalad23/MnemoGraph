@@ -202,30 +202,19 @@ class MemoryEngine:
             raise ValueError(f"Memory not found: {memory_id}")
 
         # Evolve memory (Phase 2)
+        # Note: evolution service handles all graph + vector store updates internally
         evolution = await self.evolution.evolve_memory(current, new_content)
 
-        # If new version created, process relationships
+        # If new version created, retrieve it
         if evolution.new_version:
             new_memory = await self.graph_store.get_node(evolution.new_version)
-
-            # Generate new embedding
-            new_memory.embedding = await self.embedder.embed(new_content)
-
-            # Update both stores with sync manager
-            await self.graph_store.update_node(new_memory)
-            await self.sync_manager.sync_memory_full(new_memory)
-
             print(f"✅ Memory updated with new version: {evolution.new_version}")
-
             return new_memory, evolution
 
-        # For augment, sync the updated memory
+        # For augment or preserve, return the current memory
         updated_memory = await self.graph_store.get_node(memory_id)
-        if updated_memory:
-            await self.sync_manager.sync_memory_full(updated_memory)
-
-        print(f"✅ Memory augmented: {memory_id}")
-        return current, evolution
+        print(f"✅ Memory {evolution.action}: {memory_id}")
+        return updated_memory, evolution
 
     async def delete_memory(self, memory_id: str) -> None:
         """

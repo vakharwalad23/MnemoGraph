@@ -242,3 +242,133 @@ class TestMemoryEvolutionServiceNeo4j:
             current = await service.get_current_version(sample_memory.id)
             assert current is not None
             assert current.id == result1.new_version
+
+    async def test_augment_action_updates_embedding(
+        self, mock_llm, neo4j_graph_store, mock_embedder, sample_memory
+    ):
+        """Test that augment action regenerates embeddings."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.services.memory_evolution import EvolutionAnalysis
+
+        service = MemoryEvolutionService(
+            llm=mock_llm,
+            graph_store=neo4j_graph_store,
+            embedder=mock_embedder,
+        )
+
+        await neo4j_graph_store.add_node(sample_memory)
+        original_embedding = sample_memory.embedding.copy()
+
+        # Mock the analysis to return augment action
+        mock_analysis = EvolutionAnalysis(
+            action="augment",
+            reasoning="Adding supplementary details",
+            change_description="Added new information",
+            confidence=0.9,
+        )
+
+        with patch.object(service, "_analyze_evolution", new_callable=AsyncMock) as mock_analyze:
+            mock_analyze.return_value = mock_analysis
+            result = await service.evolve_memory(sample_memory, "Additional info")
+
+        assert result.action == "augment"
+        assert result.new_version is None
+
+        # Verify embedding was regenerated
+        updated_memory = await neo4j_graph_store.get_node(sample_memory.id)
+        assert updated_memory.embedding != original_embedding
+
+    async def test_preserve_action_creates_new_memory(
+        self, mock_llm, neo4j_graph_store, mock_embedder, sample_memory
+    ):
+        """Test that preserve action creates a new conflicting memory."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.services.memory_evolution import EvolutionAnalysis
+
+        service = MemoryEvolutionService(
+            llm=mock_llm,
+            graph_store=neo4j_graph_store,
+            embedder=mock_embedder,
+        )
+
+        await neo4j_graph_store.add_node(sample_memory)
+
+        # Mock the analysis to return preserve action
+        mock_analysis = EvolutionAnalysis(
+            action="preserve",
+            reasoning="Conflicting information should be preserved separately",
+            change_description="Information contradicts existing memory",
+            confidence=0.85,
+        )
+
+        with patch.object(service, "_analyze_evolution", new_callable=AsyncMock) as mock_analyze:
+            mock_analyze.return_value = mock_analysis
+            conflicting_info = "This contradicts the original memory"
+            result = await service.evolve_memory(sample_memory, conflicting_info)
+
+        assert result.action == "preserve"
+        assert result.new_version is not None
+        assert result.new_version != sample_memory.id
+
+        # Verify new memory was created
+        new_memory = await neo4j_graph_store.get_node(result.new_version)
+        assert new_memory is not None
+        assert new_memory.content == conflicting_info
+        assert new_memory.status.value == "active"
+
+        # Verify metadata links them
+        assert "preserve_alongside" in new_memory.metadata
+        assert new_memory.metadata["preserve_alongside"] == sample_memory.id
+
+        # Original memory should still be active
+        original_memory = await neo4j_graph_store.get_node(sample_memory.id)
+        assert original_memory.status.value == "active"
+
+    async def test_preserve_action_with_sync_manager(
+        self, mock_llm, neo4j_graph_store, mock_embedder, mock_vector_store, sample_memory
+    ):
+        """Test that preserve action syncs to vector store via sync manager."""
+        from unittest.mock import AsyncMock, patch
+
+        from src.services.memory_evolution import EvolutionAnalysis
+        from src.services.memory_sync import MemorySyncManager
+
+        sync_manager = MemorySyncManager(
+            graph_store=neo4j_graph_store,
+            vector_store=mock_vector_store,
+            max_retries=3,
+            retry_delay=0.5,
+        )
+
+        service = MemoryEvolutionService(
+            llm=mock_llm,
+            graph_store=neo4j_graph_store,
+            embedder=mock_embedder,
+            vector_store=mock_vector_store,
+            sync_manager=sync_manager,
+        )
+
+        await neo4j_graph_store.add_node(sample_memory)
+
+        # Mock the analysis to return preserve action
+        mock_analysis = EvolutionAnalysis(
+            action="preserve",
+            reasoning="Conflicting data",
+            change_description="Contradictory information",
+            confidence=0.9,
+        )
+
+        with patch.object(service, "_analyze_evolution", new_callable=AsyncMock) as mock_analyze:
+            mock_analyze.return_value = mock_analysis
+            result = await service.evolve_memory(sample_memory, "Conflicting data")
+
+        assert result.action == "preserve"
+        assert result.new_version is not None
+
+        # Verify new memory is in vector store
+        new_memory = await neo4j_graph_store.get_node(result.new_version)
+        vector_memory = await mock_vector_store.get_memory(result.new_version)
+        assert vector_memory is not None
+        assert vector_memory.id == new_memory.id

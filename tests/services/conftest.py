@@ -228,3 +228,16 @@ async def mock_embedder(ollama_embedder):
 async def mock_vector_store(qdrant_vector_store):
     """Alias for qdrant_vector_store to maintain test compatibility."""
     return qdrant_vector_store
+
+
+@pytest.fixture
+def mock_sync_manager(neo4j_graph_store, mock_vector_store):
+    """Create a sync manager for testing."""
+    from src.services.memory_sync import MemorySyncManager
+
+    return MemorySyncManager(
+        graph_store=neo4j_graph_store,
+        vector_store=mock_vector_store,
+        max_retries=3,
+        retry_delay=0.5,
+    )

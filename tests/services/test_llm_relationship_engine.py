@@ -17,7 +17,13 @@ class TestLLMRelationshipEngineUnit:
     """Unit tests for LLMRelationshipEngine."""
 
     async def test_initialization(
-        self, mock_llm, mock_embedder, mock_vector_store, neo4j_graph_store, config
+        self,
+        mock_llm,
+        mock_embedder,
+        mock_vector_store,
+        neo4j_graph_store,
+        config,
+        mock_sync_manager,
     ):
         """Test engine initialization."""
         engine = LLMRelationshipEngine(
@@ -26,6 +32,7 @@ class TestLLMRelationshipEngineUnit:
             vector_store=mock_vector_store,
             graph_store=neo4j_graph_store,
             config=config,
+            sync_manager=mock_sync_manager,
         )
 
         assert engine.llm == mock_llm
@@ -42,6 +49,7 @@ class TestLLMRelationshipEngineUnit:
         neo4j_graph_store,
         config,
         sample_memories,
+        mock_sync_manager,
     ):
         """Test detailed memory formatting."""
         engine = LLMRelationshipEngine(
@@ -50,6 +58,7 @@ class TestLLMRelationshipEngineUnit:
             vector_store=mock_vector_store,
             graph_store=neo4j_graph_store,
             config=config,
+            sync_manager=mock_sync_manager,
         )
 
         formatted = engine._format_memories_detailed(sample_memories[:3])
@@ -68,6 +77,7 @@ class TestLLMRelationshipEngineUnit:
         neo4j_graph_store,
         config,
         sample_memories,
+        mock_sync_manager,
     ):
         """Test compact memory formatting."""
         engine = LLMRelationshipEngine(
@@ -76,6 +86,7 @@ class TestLLMRelationshipEngineUnit:
             vector_store=mock_vector_store,
             graph_store=neo4j_graph_store,
             config=config,
+            sync_manager=mock_sync_manager,
         )
 
         formatted = engine._format_memories_compact(sample_memories[:3])
@@ -87,7 +98,13 @@ class TestLLMRelationshipEngineUnit:
         assert len(formatted) < len(detailed)
 
     async def test_format_memories_empty(
-        self, mock_llm, mock_embedder, mock_vector_store, neo4j_graph_store, config
+        self,
+        mock_llm,
+        mock_embedder,
+        mock_vector_store,
+        neo4j_graph_store,
+        config,
+        mock_sync_manager,
     ):
         """Test formatting empty memory list."""
         engine = LLMRelationshipEngine(
@@ -96,6 +113,7 @@ class TestLLMRelationshipEngineUnit:
             vector_store=mock_vector_store,
             graph_store=neo4j_graph_store,
             config=config,
+            sync_manager=mock_sync_manager,
         )
 
         formatted = engine._format_memories_detailed([])
@@ -104,7 +122,13 @@ class TestLLMRelationshipEngineUnit:
         assert "No memories" in formatted
 
     async def test_create_edge_from_relationship(
-        self, mock_llm, mock_embedder, mock_vector_store, neo4j_graph_store, config
+        self,
+        mock_llm,
+        mock_embedder,
+        mock_vector_store,
+        neo4j_graph_store,
+        config,
+        mock_sync_manager,
     ):
         """Test creating edge from relationship."""
         engine = LLMRelationshipEngine(
@@ -113,6 +137,7 @@ class TestLLMRelationshipEngineUnit:
             vector_store=mock_vector_store,
             graph_store=neo4j_graph_store,
             config=config,
+            sync_manager=mock_sync_manager,
         )
 
         from src.models.relationships import Relationship
@@ -140,7 +165,14 @@ class TestLLMRelationshipEngineNeo4j:
     """Integration tests with Neo4j."""
 
     async def test_process_new_memory_neo4j(
-        self, mock_llm, mock_embedder, mock_vector_store, neo4j_graph_store, config, sample_memory
+        self,
+        mock_llm,
+        mock_embedder,
+        mock_vector_store,
+        neo4j_graph_store,
+        config,
+        sample_memory,
+        mock_sync_manager,
     ):
         """Test processing new memory with Neo4j."""
         engine = LLMRelationshipEngine(
@@ -149,6 +181,7 @@ class TestLLMRelationshipEngineNeo4j:
             vector_store=mock_vector_store,
             graph_store=neo4j_graph_store,
             config=config,
+            sync_manager=mock_sync_manager,
         )
 
         # Process memory
@@ -163,7 +196,14 @@ class TestLLMRelationshipEngineNeo4j:
         assert retrieved.id == sample_memory.id
 
     async def test_process_with_edges_neo4j(
-        self, mock_llm, mock_embedder, mock_vector_store, neo4j_graph_store, config, sample_memories
+        self,
+        mock_llm,
+        mock_embedder,
+        mock_vector_store,
+        neo4j_graph_store,
+        config,
+        sample_memories,
+        mock_sync_manager,
     ):
         """Test that edges are created in Neo4j."""
         engine = LLMRelationshipEngine(
@@ -172,6 +212,7 @@ class TestLLMRelationshipEngineNeo4j:
             vector_store=mock_vector_store,
             graph_store=neo4j_graph_store,
             config=config,
+            sync_manager=mock_sync_manager,
         )
 
         # Add context memories
@@ -190,7 +231,14 @@ class TestLLMRelationshipEngineNeo4j:
         assert edge_count >= 0
 
     async def test_create_derived_memories_neo4j(
-        self, mock_llm, mock_embedder, mock_vector_store, neo4j_graph_store, config, sample_memory
+        self,
+        mock_llm,
+        mock_embedder,
+        mock_vector_store,
+        neo4j_graph_store,
+        config,
+        sample_memory,
+        mock_sync_manager,
     ):
         """Test creating derived memories in Neo4j."""
         engine = LLMRelationshipEngine(
@@ -199,6 +247,7 @@ class TestLLMRelationshipEngineNeo4j:
             vector_store=mock_vector_store,
             graph_store=neo4j_graph_store,
             config=config,
+            sync_manager=mock_sync_manager,
         )
 
         await neo4j_graph_store.add_node(sample_memory)
@@ -228,7 +277,14 @@ class TestBuildExtractionPrompt:
     """Tests for prompt building."""
 
     async def test_build_extraction_prompt(
-        self, mock_llm, mock_embedder, mock_vector_store, neo4j_graph_store, config, sample_memory
+        self,
+        mock_llm,
+        mock_embedder,
+        mock_vector_store,
+        neo4j_graph_store,
+        config,
+        sample_memory,
+        mock_sync_manager,
     ):
         """Test extraction prompt building."""
         engine = LLMRelationshipEngine(
@@ -237,6 +293,7 @@ class TestBuildExtractionPrompt:
             vector_store=mock_vector_store,
             graph_store=neo4j_graph_store,
             config=config,
+            sync_manager=mock_sync_manager,
         )
 
         from src.models.relationships import ContextBundle
