@@ -477,7 +477,6 @@ class TestRelationshipTypes:
             "PRECEDES",
             "FOLLOWS",
             "UPDATES",
-            "SUPERSEDES",
             "PART_OF",
             "BELONGS_TO",
             "PARENT_OF",
