@@ -168,8 +168,9 @@ class InvalidationManager:
 
     def stop_background_worker(self):
         """Stop background invalidation worker."""
-        if self._worker_task:
+        if self._worker_task and not self._worker_task.done():
             self._worker_task.cancel()
+            # Note: Task will be awaited in memory_engine.close()
 
     async def _invalidation_worker(self, interval_hours: int):
         """

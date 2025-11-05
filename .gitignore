@@ -31,3 +31,7 @@ htmlcov/
 *.db-journal
 *.db-wal
 *.db-shm
+
+# log files
+*.log
+logs/

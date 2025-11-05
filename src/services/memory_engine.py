@@ -8,6 +8,7 @@ Brings together:
 - Graph Store & Vector Store
 """
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -459,8 +460,17 @@ class MemoryEngine:
         """Close all connections and stop workers."""
         logger.info("Shutting down Memory Engine")
 
-        # Stop background workers
+        # Stop background workers and wait for them to finish
         self.invalidation.stop_background_worker()
+
+        # Wait for background task to complete cancellation
+        if hasattr(self.invalidation, "_worker_task") and self.invalidation._worker_task:
+            try:
+                await self.invalidation._worker_task
+            except asyncio.CancelledError:
+                pass  # Expected when cancelling
+            except Exception as e:
+                logger.warning(f"Error during worker shutdown: {e}")
 
         # Close stores
         await self.graph_store.close()
