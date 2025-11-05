@@ -61,6 +61,18 @@ class MemoryEvolutionConfig(BaseModel):
     enable_time_travel: bool = True
 
 
+class LoggingConfig(BaseModel):
+    """Logging configuration."""
+
+    level: str = "INFO"
+    log_to_file: bool = True
+    log_dir: str = "logs"
+    file_rotation: str = "10 MB"
+    file_retention: str = "7 days"
+    compression: str = "zip"
+    serialize: bool = True
+
+
 class QdrantConfig(BaseModel):
     """Optimized Qdrant configuration."""
 
@@ -92,15 +104,12 @@ class Config(BaseModel):
     embedder: EmbedderConfig = Field(default_factory=EmbedderConfig)
     llm_relationships: LLMRelationshipConfig = Field(default_factory=LLMRelationshipConfig)
     memory_evolution: MemoryEvolutionConfig = Field(default_factory=MemoryEvolutionConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     qdrant: QdrantConfig = Field(default_factory=QdrantConfig)
     neo4j: Neo4jConfig = Field(default_factory=Neo4jConfig)
 
     # Graph store backend
     graph_backend: str = "neo4j"
-
-    # Debug and logging
-    debug: bool = False
-    log_level: str = "INFO"
 
     @classmethod
     def from_env(cls, env_file: str | Path | None = None) -> "Config":
@@ -190,8 +199,15 @@ class Config(BaseModel):
                 quantization_type=get_env("MNEMO_QDRANT_QUANTIZATION_TYPE", "int8"),
                 on_disk=get_env("MNEMO_QDRANT_ON_DISK", False),
             ),
-            debug=get_env("MNEMO_DEBUG", False),
-            log_level=get_env("MNEMO_LOG_LEVEL", "INFO"),
+            logging=LoggingConfig(
+                level=get_env("MNEMO_LOG_LEVEL", "INFO"),
+                log_to_file=get_env("MNEMO_LOG_TO_FILE", True),
+                log_dir=get_env("MNEMO_LOG_DIR", "logs"),
+                file_rotation=get_env("MNEMO_LOG_FILE_ROTATION", "10 MB"),
+                file_retention=get_env("MNEMO_LOG_FILE_RETENTION", "7 days"),
+                compression=get_env("MNEMO_LOG_COMPRESSION", "zip"),
+                serialize=get_env("MNEMO_LOG_SERIALIZE", True),
+            ),
         )
 
     @classmethod
@@ -260,14 +276,12 @@ class Config(BaseModel):
             final_dict["neo4j"] = env_config.neo4j.model_dump()
         if env_config.qdrant != default.qdrant:
             final_dict["qdrant"] = env_config.qdrant.model_dump()
+        if env_config.logging != default.logging:
+            final_dict["logging"] = env_config.logging.model_dump()
 
         # Also check top-level fields
         if env_config.graph_backend != default.graph_backend:
             final_dict["graph_backend"] = env_config.graph_backend
-        if env_config.debug != default.debug:
-            final_dict["debug"] = env_config.debug
-        if env_config.log_level != default.log_level:
-            final_dict["log_level"] = env_config.log_level
 
         return cls(**final_dict) if final_dict else env_config
 

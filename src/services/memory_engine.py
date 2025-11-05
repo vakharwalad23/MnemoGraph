@@ -23,6 +23,9 @@ from src.services.invalidation_manager import InvalidationManager
 from src.services.llm_relationship_engine import LLMRelationshipEngine
 from src.services.memory_evolution import MemoryEvolutionService
 from src.services.memory_sync import MemorySyncManager
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class MemoryEngine:
@@ -97,20 +100,20 @@ class MemoryEngine:
 
     async def initialize(self) -> None:
         """Initialize all stores."""
-        print("🔧 Initializing Memory Engine...")
+        logger.info("Initializing Memory Engine")
 
         await self.graph_store.initialize()
-        print("   ✓ Graph store initialized")
+        logger.info("Graph store initialized")
 
         await self.vector_store.initialize()
-        print("   ✓ Vector store initialized")
+        logger.info("Vector store initialized")
 
         # Start background invalidation worker if enabled
         if self.config.llm_relationships.enable_auto_invalidation:
             self.invalidation.start_background_worker(interval_hours=24)
-            print("   ✓ Background invalidation worker started")
+            logger.info("Background invalidation worker started")
 
-        print("✅ Memory Engine ready!")
+        logger.info("Memory Engine ready")
 
     # CORE MEMORY OPERATIONS
 
@@ -131,10 +134,10 @@ class MemoryEngine:
         Returns:
             Tuple of (Memory, RelationshipBundle)
         """
-        print(f"\n📝 Adding memory: {content[:50]}...")
+        logger.info(f"Adding memory: {content[:50]}")
 
         # Generate embedding
-        print("   🔢 Generating embedding...")
+        logger.debug("Generating embedding")
         embedding = await self.embedder.embed(content)
 
         # Create memory object
@@ -149,12 +152,13 @@ class MemoryEngine:
         )
 
         # Process with relationship engine (handles graph + vector store)
-        print("   🔗 Extracting relationships...")
+        logger.debug("Extracting relationships")
         extraction = await self.relationship_engine.process_new_memory(memory)
 
-        print(f"✅ Memory added: {memory.id}")
-        print(f"   Relationships: {len(extraction.relationships)}")
-        print(f"   Derived insights: {len(extraction.derived_insights)}")
+        logger.info(
+            f"Memory added: {memory.id}, relationships: {len(extraction.relationships)}, "
+            f"derived insights: {len(extraction.derived_insights)}"
+        )
 
         return memory, extraction
 
@@ -194,7 +198,7 @@ class MemoryEngine:
         Returns:
             Tuple of (updated_memory, evolution_result)
         """
-        print(f"\n🔄 Updating memory: {memory_id}")
+        logger.info(f"Updating memory: {memory_id}")
 
         # Get current memory
         current = await self.graph_store.get_node(memory_id)
@@ -208,12 +212,12 @@ class MemoryEngine:
         # If new version created, retrieve it
         if evolution.new_version:
             new_memory = await self.graph_store.get_node(evolution.new_version)
-            print(f"✅ Memory updated with new version: {evolution.new_version}")
+            logger.info(f"Memory updated with new version: {evolution.new_version}")
             return new_memory, evolution
 
         # For augment or preserve, return the current memory
         updated_memory = await self.graph_store.get_node(memory_id)
-        print(f"✅ Memory {evolution.action}: {memory_id}")
+        logger.info(f"Memory {evolution.action}: {memory_id}")
         return updated_memory, evolution
 
     async def delete_memory(self, memory_id: str) -> None:
@@ -223,7 +227,7 @@ class MemoryEngine:
         Args:
             memory_id: Memory to delete
         """
-        print(f"🗑️  Deleting memory: {memory_id}")
+        logger.info(f"Deleting memory: {memory_id}")
 
         # Delete from graph store first (source of truth)
         await self.graph_store.delete_node(memory_id)
@@ -231,7 +235,7 @@ class MemoryEngine:
         # Sync deletion to vector store
         await self.sync_manager.sync_memory_deletion(memory_id)
 
-        print(f"✅ Memory deleted: {memory_id}")
+        logger.info(f"Memory deleted: {memory_id}")
 
     # SEARCH & QUERY OPERATIONS
 
@@ -453,7 +457,7 @@ class MemoryEngine:
 
     async def close(self) -> None:
         """Close all connections and stop workers."""
-        print("🛑 Shutting down Memory Engine...")
+        logger.info("Shutting down Memory Engine")
 
         # Stop background workers
         self.invalidation.stop_background_worker()
@@ -466,7 +470,7 @@ class MemoryEngine:
         await self.llm.close()
         await self.embedder.close()
 
-        print("✅ Memory Engine shutdown complete")
+        logger.info("Memory Engine shutdown complete")
 
     # HELPER METHODS
 

@@ -49,6 +49,15 @@ class TestConfigDefaults:
         assert config.qdrant.use_grpc is True
         assert config.qdrant.use_quantization is True
 
+        # Logging defaults
+        assert config.logging.level == "INFO"
+        assert config.logging.log_to_file is True
+        assert config.logging.log_dir == "logs"
+        assert config.logging.file_rotation == "10 MB"
+        assert config.logging.file_retention == "7 days"
+        assert config.logging.compression == "zip"
+        assert config.logging.serialize is True
+
     def test_llm_config_creation(self):
         """Test creating LLM config."""
         llm_config = LLMConfig(
@@ -110,13 +119,13 @@ class TestConfigFromEnv:
         """Test loading boolean values from environment."""
         monkeypatch.setenv("MNEMO_QDRANT_USE_GRPC", "false")
         monkeypatch.setenv("MNEMO_QDRANT_USE_QUANTIZATION", "0")
-        monkeypatch.setenv("MNEMO_DEBUG", "true")
+        monkeypatch.setenv("MNEMO_LOG_TO_FILE", "true")
 
         config = Config.from_env()
 
         assert config.qdrant.use_grpc is False
         assert config.qdrant.use_quantization is False
-        assert config.debug is True
+        assert config.logging.log_to_file is True
 
     def test_from_env_graph_backend(self, monkeypatch):
         """Test setting graph backend from environment."""
@@ -164,6 +173,26 @@ MNEMO_GRAPH_BACKEND=neo4j
         assert config.llm.model == "gpt-4o"
         assert config.llm.api_key == "sk-from-file"
         assert config.graph_backend == "neo4j"
+
+    def test_from_env_logging_config(self, monkeypatch):
+        """Test loading logging configuration from environment."""
+        monkeypatch.setenv("MNEMO_LOG_LEVEL", "DEBUG")
+        monkeypatch.setenv("MNEMO_LOG_TO_FILE", "false")
+        monkeypatch.setenv("MNEMO_LOG_DIR", "test_logs")
+        monkeypatch.setenv("MNEMO_LOG_FILE_ROTATION", "100 MB")
+        monkeypatch.setenv("MNEMO_LOG_FILE_RETENTION", "14 days")
+        monkeypatch.setenv("MNEMO_LOG_COMPRESSION", "gz")
+        monkeypatch.setenv("MNEMO_LOG_SERIALIZE", "false")
+
+        config = Config.from_env()
+
+        assert config.logging.level == "DEBUG"
+        assert config.logging.log_to_file is False
+        assert config.logging.log_dir == "test_logs"
+        assert config.logging.file_rotation == "100 MB"
+        assert config.logging.file_retention == "14 days"
+        assert config.logging.compression == "gz"
+        assert config.logging.serialize is False
 
     def test_from_env_missing_optional_values(self, monkeypatch):
         """Test that missing optional values use defaults."""
@@ -245,8 +274,15 @@ class TestConfigFromYAML:
                 "quantization_type": "int8",
                 "on_disk": True,
             },
-            "debug": True,
-            "log_level": "DEBUG",
+            "logging": {
+                "level": "DEBUG",
+                "log_to_file": True,
+                "log_dir": "custom_logs",
+                "file_rotation": "50 MB",
+                "file_retention": "30 days",
+                "compression": "gz",
+                "serialize": True,
+            },
         }
         yaml_file.write_text(yaml.dump(config_data))
 
@@ -266,8 +302,11 @@ class TestConfigFromYAML:
         assert config.qdrant.use_quantization is True
         assert config.qdrant.quantization_type == "int8"
         assert config.qdrant.on_disk is True
-        assert config.debug is True
-        assert config.log_level == "DEBUG"
+        assert config.logging.level == "DEBUG"
+        assert config.logging.log_dir == "custom_logs"
+        assert config.logging.file_rotation == "50 MB"
+        assert config.logging.file_retention == "30 days"
+        assert config.logging.compression == "gz"
 
     def test_from_yaml_partial_config(self, tmp_path):
         """Test loading partial config with defaults."""
@@ -507,6 +546,38 @@ class TestConfigSubComponents:
         assert config.memory_evolution.max_version_history == 100
         assert config.memory_evolution.enable_time_travel is True
 
+    def test_logging_config(self):
+        """Test logging config defaults and customization."""
+        # Test defaults
+        config = Config()
+        assert config.logging.level == "INFO"
+        assert config.logging.log_to_file is True
+        assert config.logging.log_dir == "logs"
+        assert config.logging.file_rotation == "10 MB"
+        assert config.logging.file_retention == "7 days"
+        assert config.logging.compression == "zip"
+        assert config.logging.serialize is True
+
+        # Test custom values
+        from src.config import LoggingConfig
+
+        custom_logging = LoggingConfig(
+            level="DEBUG",
+            log_to_file=False,
+            log_dir="custom_logs",
+            file_rotation="50 MB",
+            file_retention="30 days",
+            compression="gz",
+            serialize=False,
+        )
+        assert custom_logging.level == "DEBUG"
+        assert custom_logging.log_to_file is False
+        assert custom_logging.log_dir == "custom_logs"
+        assert custom_logging.file_rotation == "50 MB"
+        assert custom_logging.file_retention == "30 days"
+        assert custom_logging.compression == "gz"
+        assert custom_logging.serialize is False
+
 
 class TestConfigEdgeCases:
     """Test edge cases and error handling."""
@@ -524,12 +595,12 @@ class TestConfigEdgeCases:
 
     def test_invalid_boolean_env_var(self, monkeypatch):
         """Test handling of invalid boolean values."""
-        monkeypatch.setenv("MNEMO_DEBUG", "maybe")
+        monkeypatch.setenv("MNEMO_LOG_TO_FILE", "maybe")
 
         config = Config.from_env()
 
         # Invalid boolean should be False
-        assert config.debug is False
+        assert config.logging.log_to_file is False
 
     def test_config_immutability_after_creation(self):
         """Test that config can be modified after creation."""

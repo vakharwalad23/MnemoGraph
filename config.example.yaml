@@ -53,5 +53,11 @@ memory_evolution:
   max_version_history: 100
   enable_time_travel: true
 
-debug: false
-log_level: INFO
+logging:
+  level: INFO
+  log_to_file: true
+  log_dir: logs
+  file_rotation: 10 MB
+  file_retention: 7 days
+  compression: zip
+  serialize: true
