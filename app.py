@@ -5,7 +5,6 @@ A REST API server for the MnemoGraph memory engine.
 Provides endpoints for adding, querying, updating, and deleting memories.
 """
 
-import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -16,13 +15,11 @@ from pydantic import BaseModel, Field
 from src.config import Config
 from src.core.factory import EmbedderFactory, GraphStoreFactory, LLMFactory, VectorStoreFactory
 from src.services.memory_engine import MemoryEngine
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from src.utils.logger import get_logger, setup_logging
 
 # Global engine instance
 engine: MemoryEngine | None = None
+logger = get_logger(__name__)
 
 
 # Pydantic models for API
@@ -132,31 +129,42 @@ async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown."""
     global engine
 
-    logger.info("🚀 Starting MnemoGraph server...")
-
     # Load configuration from environment or use defaults
     config = Config.from_env()
+
+    # Initialize logging with config
+    setup_logging(
+        level=config.logging.level,
+        log_to_file=config.logging.log_to_file,
+        log_dir=config.logging.log_dir,
+        file_rotation=config.logging.file_rotation,
+        file_retention=config.logging.file_retention,
+        compression=config.logging.compression,
+        serialize=config.logging.serialize,
+    )
+
+    logger.info("Starting MnemoGraph server")
     logger.info(
-        f"   Configuration: LLM={config.llm.provider}/{config.llm.model}, "
+        f"Configuration: LLM={config.llm.provider}/{config.llm.model}, "
         f"Embedder={config.embedder.provider}/{config.embedder.model}, "
         f"Graph={config.graph_backend}"
     )
 
     # Create components using factories
-    logger.info("   Creating LLM provider...")
+    logger.info("Creating LLM provider")
     llm = LLMFactory.create(config.llm)
 
-    logger.info("   Creating embedder...")
+    logger.info("Creating embedder")
     embedder = EmbedderFactory.create(config.embedder)
 
-    logger.info("   Creating graph store...")
+    logger.info("Creating graph store")
     graph_store = GraphStoreFactory.create(config)
 
-    logger.info("   Detecting embedding dimension...")
+    logger.info("Detecting embedding dimension")
     vector_size = await EmbedderFactory.get_dimension(embedder, config.embedder)
-    logger.info(f"   Embedding dimension: {vector_size}")
+    logger.info(f"Embedding dimension: {vector_size}")
 
-    logger.info("   Creating vector store...")
+    logger.info("Creating vector store")
     vector_store = VectorStoreFactory.create(config.qdrant, vector_size)
 
     # Create and initialize engine
@@ -169,14 +177,14 @@ async def lifespan(app: FastAPI):
     )
 
     await engine.initialize()
-    logger.info("✅ MnemoGraph engine initialized")
+    logger.info("MnemoGraph engine initialized")
 
     yield
 
     # Cleanup
-    logger.info("🛑 Shutting down MnemoGraph server...")
+    logger.info("Shutting down MnemoGraph server")
     await engine.close()
-    logger.info("✅ Cleanup complete")
+    logger.info("Cleanup complete")
 
 
 # Create FastAPI app

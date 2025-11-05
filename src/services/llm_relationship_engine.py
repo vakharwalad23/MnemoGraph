@@ -22,6 +22,9 @@ from src.models.relationships import (
 from src.services.context_filter import MultiStageFilter
 from src.services.invalidation_manager import InvalidationManager
 from src.services.memory_sync import MemorySyncManager
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class LLMRelationshipEngine:
@@ -86,7 +89,7 @@ class LLMRelationshipEngine:
         start_time = time.time()
 
         # Step 1: Gather context (multi-stage filtering)
-        print(f"\n🔍 Gathering context for memory: {memory.id[:8]}...")
+        logger.info(f"Gathering context for memory: {memory.id[:8]}")
         context = await self.filter.gather_context(memory)
 
         # Step 2: Build comprehensive extraction prompt
@@ -96,7 +99,7 @@ class LLMRelationshipEngine:
         # - LLM extraction
         # - Vector store upsert
         # - Graph node creation
-        print("🤖 Extracting relationships with LLM...")
+        logger.debug("Extracting relationships with LLM")
 
         extraction_task = self.llm.complete(
             prompt, response_format=RelationshipBundle, max_tokens=2000, temperature=0.0
@@ -113,7 +116,7 @@ class LLMRelationshipEngine:
         extraction = results[0] if not isinstance(results[0], Exception) else None
 
         if not extraction:
-            print("❌ LLM extraction failed")
+            logger.error("LLM extraction failed")
             return RelationshipBundle(
                 memory_id=memory.id,
                 relationships=[],
@@ -124,7 +127,7 @@ class LLMRelationshipEngine:
             )
 
         # Step 4: Create edges in parallel
-        print(f"🔗 Creating {len(extraction.relationships)} relationship edges...")
+        logger.debug(f"Creating {len(extraction.relationships)} relationship edges")
         edge_tasks = []
 
         min_confidence = getattr(
@@ -141,23 +144,23 @@ class LLMRelationshipEngine:
 
         # Step 5: Handle derived memories
         if extraction.derived_insights:
-            print(f"💡 Creating {len(extraction.derived_insights)} derived memories...")
+            logger.debug(f"Creating {len(extraction.derived_insights)} derived memories")
             await self._create_derived_memories(extraction.derived_insights, memory)
 
         # Step 6: Event-driven invalidation check
         # Check if this new memory supersedes any existing ones
         if context.vector_candidates:
-            print("🔄 Checking for supersession...")
+            logger.debug("Checking for supersession")
             superseded = await self.invalidation.check_supersession(
                 memory, context.vector_candidates[:10]
             )
             if superseded:
-                print(f"   ✓ Superseded {len(superseded)} existing memories")
+                logger.info(f"Superseded {len(superseded)} existing memories")
 
         extraction_time = (time.time() - start_time) * 1000
         extraction.extraction_time_ms = extraction_time
 
-        print(f"✅ Extraction complete in {extraction_time:.0f}ms")
+        logger.info(f"Extraction complete in {extraction_time:.0f}ms")
 
         return extraction
 
@@ -417,10 +420,10 @@ Begin extraction:
                         }
                     )
 
-                print(f"   ✓ Created derived memory: {derived_id[:8]}...")
+                logger.debug(f"Created derived memory: {derived_id[:8]}")
 
             except Exception as e:
-                print(f"   ✗ Error creating derived memory: {e}")
+                logger.error(f"Error creating derived memory: {e}")
 
     async def close(self):
         """Close resources."""

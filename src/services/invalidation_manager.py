@@ -20,6 +20,9 @@ from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, MemoryStatus
 from src.models.version import InvalidationResult, InvalidationStatus
 from src.services.memory_sync import MemorySyncManager
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ValidationCheck(BaseModel):
@@ -165,8 +168,9 @@ class InvalidationManager:
 
     def stop_background_worker(self):
         """Stop background invalidation worker."""
-        if self._worker_task:
+        if self._worker_task and not self._worker_task.done():
             self._worker_task.cancel()
+            # Note: Task will be awaited in memory_engine.close()
 
     async def _invalidation_worker(self, interval_hours: int):
         """
@@ -177,12 +181,12 @@ class InvalidationManager:
         """
         while True:
             try:
-                print("🔄 Starting periodic memory validation...")
+                logger.info("Starting periodic memory validation")
 
                 # Find memories that need validation
                 candidates = await self._find_validation_candidates()
 
-                print(f"Found {len(candidates)} memories to validate")
+                logger.info(f"Found {len(candidates)} memories to validate")
 
                 # Validate in batches
                 batch_size = 10
@@ -197,13 +201,13 @@ class InvalidationManager:
                     # Small delay between batches
                     await asyncio.sleep(1)
 
-                print("✅ Periodic validation complete")
+                logger.info("Periodic validation complete")
 
             except asyncio.CancelledError:
-                print("🛑 Background validation worker stopped")
+                logger.info("Background validation worker stopped")
                 break
             except Exception as e:
-                print(f"❌ Error in validation worker: {e}")
+                logger.error(f"Error in validation worker: {e}")
 
             # Wait for next run
             await asyncio.sleep(interval_hours * 3600)
@@ -260,7 +264,7 @@ class InvalidationManager:
                 await self.graph_store.update_node(memory)
 
         except Exception as e:
-            print(f"Error validating {memory.id}: {e}")
+            logger.error(f"Error validating {memory.id}: {e}")
 
     # 3. EVENT-DRIVEN INVALIDATION
 
@@ -347,7 +351,7 @@ Respond with JSON:
                     superseded.append(candidate)
 
             except Exception as e:
-                print(f"Error checking supersession for {candidate.id}: {e}")
+                logger.error(f"Error checking supersession for {candidate.id}: {e}")
 
         return superseded
 

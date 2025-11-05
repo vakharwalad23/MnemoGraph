@@ -17,6 +17,9 @@ from src.core.llm.base import LLMProvider
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory
 from src.models.relationships import ContextBundle
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class RelevanceScore(BaseModel):
@@ -123,14 +126,11 @@ class MultiStageFilter:
         stage3_time = (time.time() - start) * 1000
 
         # Log performance
-        print(
-            f"""
-Context Gathering Performance:
-  Stage 1 (Vector):  {stage1_time:.1f}ms → {len(vector_candidates)} candidates
-  Stage 2 (Hybrid):  {stage2_time:.1f}ms → {len(combined_candidates)} total
-  Stage 3 (LLM Pre): {stage3_time:.1f}ms → {len(filtered)} final
-  Total: {stage1_time + stage2_time + stage3_time:.1f}ms
-"""
+        logger.info(
+            f"Context gathering: Stage1={stage1_time:.1f}ms ({len(vector_candidates)} candidates), "
+            f"Stage2={stage2_time:.1f}ms ({len(combined_candidates)} total), "
+            f"Stage3={stage3_time:.1f}ms ({len(filtered)} final), "
+            f"Total={stage1_time + stage2_time + stage3_time:.1f}ms"
         )
 
         return ContextBundle(
@@ -169,7 +169,7 @@ Context Gathering Performance:
             return [r.memory for r in results] if results else []
 
         except Exception as e:
-            print(f"Vector search failed: {e}")
+            logger.error(f"Vector search failed: {e}")
             return []
 
     async def _stage2_hybrid_filtering(self, memory: Memory) -> dict[str, list[Memory]]:
@@ -394,7 +394,7 @@ Return JSON array of top {target} most relevant:
             return [c for c in candidates if c.id in top_ids]
 
         except Exception as e:
-            print(f"LLM pre-filtering failed: {e}, using all candidates")
+            logger.warning(f"LLM pre-filtering failed: {e}, using all candidates")
             return candidates[:target]
 
     def _combine_and_deduplicate(
