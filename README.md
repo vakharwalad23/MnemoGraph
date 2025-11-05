@@ -4,7 +4,7 @@
 
 MnemoGraph is a memory management system that leverages Large Language Models to understand and connect information naturally. It combines vector embeddings for semantic search with LLM-powered relationship inference to create a contextually-aware knowledge network.
 
-> **⚠️ Development Status**: Active development. The test suite desperately needs a rewrite (yes, we know, don't judge us - it's on the list, we promise! 😅).
+> **⚠️ Development Status**: Active development. The test suite desperately needs a rewrite (yes, I know, don't judge me - it's on the list, I promise! 😅).
 
 > **🤝 Contributions Welcome!** I'm actively seeking contributors to make MnemoGraph awesome. Whether you're fixing bugs, adding features, or improving docs - your help is valued!
 
