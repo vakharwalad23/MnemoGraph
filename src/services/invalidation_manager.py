@@ -310,11 +310,10 @@ Important: Use the CURRENT DATE/TIME above as your reference point for temporal 
 
 Does the new memory:
 1. Update/correct the existing memory? (action: "supersede")
-2. Contradict but both are valid? (action: "mark_conflict")
-3. Complement without replacing? (action: "none")
+2. Complement without replacing? (action: "none")
 
 Respond with JSON:
-- action: supersede|mark_conflict|none
+- action: supersede|none
 - reasoning: Brief explanation
 """
 
@@ -322,7 +321,7 @@ Respond with JSON:
                 model_config = {"extra": "ignore"}
                 action: str = Field(
                     ...,
-                    description="REQUIRED: Must be exactly 'supersede' if the new memory replaces the candidate, or 'keep_both' if both should remain active",
+                    description="REQUIRED: Must be exactly 'supersede' if the new memory replaces the candidate, or 'none' if both should remain active",
                 )
                 reasoning: str = Field(
                     ...,

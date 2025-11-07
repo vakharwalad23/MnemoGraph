@@ -9,7 +9,6 @@ from pydantic import ValidationError
 
 from src.models.memory import Memory, MemoryStatus, NodeType
 from src.models.relationships import (
-    Conflict,
     ContextBundle,
     DerivedInsight,
     Edge,
@@ -193,12 +192,10 @@ class TestRelationshipBundle:
         bundle = RelationshipBundle(
             memory_id="mem_new",
             relationships=relationships,
-            overall_analysis="Test analysis",
         )
 
         assert bundle.memory_id == "mem_new"
         assert len(bundle.relationships) == 1
-        assert bundle.overall_analysis == "Test analysis"
         assert bundle.extraction_time_ms == 0.0
 
     def test_bundle_with_derived_insights(self):
@@ -221,24 +218,16 @@ class TestRelationshipBundle:
         assert len(bundle.derived_insights) == 1
         assert bundle.derived_insights[0].content == "User is learning Python systematically"
 
-    def test_bundle_with_conflicts(self):
-        """Test bundle with conflicts."""
-        conflicts = [
-            Conflict(
-                target_id="mem_old",
-                conflict_type="performance_claim",
-                resolution="preserve_both_as_history",
-                reasoning="Different contexts",
-            )
-        ]
-
+    def test_bundle_empty(self):
+        """Test bundle with no relationships or insights."""
         bundle = RelationshipBundle(
             memory_id="mem_new",
-            conflicts=conflicts,
         )
 
-        assert len(bundle.conflicts) == 1
-        assert bundle.conflicts[0].conflict_type == "performance_claim"
+        assert bundle.memory_id == "mem_new"
+        assert len(bundle.relationships) == 0
+        assert len(bundle.derived_insights) == 0
+        assert bundle.extraction_time_ms == 0.0
 
 
 class TestDerivedInsight:
@@ -273,37 +262,6 @@ class TestDerivedInsight:
                 type=insight_type,
             )
             assert insight.type == insight_type
-
-
-class TestConflict:
-    """Test Conflict model."""
-
-    def test_conflict_creation(self):
-        """Test basic conflict creation."""
-        conflict = Conflict(
-            target_id="mem_123",
-            conflict_type="version_mismatch",
-            resolution="use_latest",
-            reasoning="New version supersedes old",
-        )
-
-        assert conflict.target_id == "mem_123"
-        assert conflict.conflict_type == "version_mismatch"
-        assert conflict.resolution == "use_latest"
-        assert conflict.reasoning == "New version supersedes old"
-
-    def test_conflict_resolutions(self):
-        """Test different conflict resolutions."""
-        resolutions = ["use_latest", "preserve_both", "merge", "escalate"]
-
-        for resolution in resolutions:
-            conflict = Conflict(
-                target_id="mem_123",
-                conflict_type="test",
-                resolution=resolution,
-                reasoning="Test reasoning",
-            )
-            assert conflict.resolution == resolution
 
 
 class TestEdge:

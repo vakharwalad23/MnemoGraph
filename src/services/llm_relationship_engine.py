@@ -121,8 +121,6 @@ class LLMRelationshipEngine:
                 memory_id=memory.id,
                 relationships=[],
                 derived_insights=[],
-                conflicts=[],
-                overall_analysis="Extraction failed",
                 extraction_time_ms=(time.time() - start_time) * 1000,
             )
 
@@ -276,16 +274,7 @@ Return JSON:
             "source_ids": ["mem_120", "mem_121"],
             "type": "pattern_recognition"
         }}
-    ],
-    "conflicts": [
-        {{
-            "target_id": "mem_100",
-            "conflict_type": "update",
-            "resolution": "preserve_both_as_history",
-            "reasoning": "New version supersedes old"
-        }}
-    ],
-    "overall_analysis": "Brief summary"
+    ]
 }}
 
 ## Guidelines

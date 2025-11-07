@@ -71,7 +71,7 @@ class Relationship(BaseModel):
 
     type: RelationshipType = Field(
         ...,
-        description="REQUIRED: The type of relationship. Must be one of the valid RelationshipType enum values (RELATES_TO, CAUSED_BY, CONFLICTS_WITH, etc.)",
+        description="REQUIRED: The type of relationship. Must be one of the valid RelationshipType enum values (SIMILAR_TO, REFERENCES etc.)",
     )
     target_id: str = Field(
         ..., description="REQUIRED: The ID of the target memory that this relationship points to"
@@ -85,26 +85,6 @@ class Relationship(BaseModel):
     reasoning: str = Field(
         ...,
         description="REQUIRED: Explain why this relationship exists. Provide specific evidence from both memories.",
-    )
-
-
-class Conflict(BaseModel):
-    """Conflict between memories."""
-
-    model_config = {"extra": "ignore"}
-
-    target_id: str = Field(..., description="REQUIRED: The ID of the conflicting memory")
-    conflict_type: str = Field(
-        ...,
-        description="REQUIRED: Type of conflict (e.g., 'factual_contradiction', 'temporal_inconsistency', 'logical_conflict')",
-    )
-    resolution: str = Field(
-        ...,
-        description="REQUIRED: How this conflict should be resolved (e.g., 'prefer_newer', 'prefer_more_confident', 'keep_both')",
-    )
-    reasoning: str = Field(
-        ...,
-        description="REQUIRED: Explain the nature of the conflict and why this resolution approach is appropriate",
     )
 
 
@@ -157,14 +137,6 @@ class RelationshipBundle(BaseModel):
     derived_insights: list[DerivedInsight] = Field(
         default_factory=list,
         description="OPTIONAL: List of insights derived from analyzing multiple memories together. Can be empty.",
-    )
-    conflicts: list[Conflict] = Field(
-        default_factory=list,
-        description="OPTIONAL: List of conflicts with other memories. Can be empty if no conflicts found.",
-    )
-    overall_analysis: str = Field(
-        default="",
-        description="OPTIONAL: High-level summary of the relationship analysis. Provide overview of key findings.",
     )
     extraction_time_ms: float = Field(
         default=0.0,

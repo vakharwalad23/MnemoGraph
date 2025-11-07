@@ -38,9 +38,7 @@ class AddMemoryResponse(BaseModel):
     content: str
     relationships_created: int
     derived_insights_created: int
-    conflicts_detected: int
     extraction_time_ms: float
-    overall_analysis: str | None = None
 
 
 class QueryMemoriesRequest(BaseModel):
@@ -247,9 +245,7 @@ async def add_memory(request: AddMemoryRequest):
             content=memory.content,
             relationships_created=len(extraction.relationships),
             derived_insights_created=len(extraction.derived_insights),
-            conflicts_detected=len(extraction.conflicts),
             extraction_time_ms=extraction.extraction_time_ms,
-            overall_analysis=extraction.overall_analysis if extraction.overall_analysis else None,
         )
     except Exception as e:
         logger.error(f"Error adding memory: {e}")
