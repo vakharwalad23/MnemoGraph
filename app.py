@@ -387,6 +387,9 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
             # Update with LLM-guided versioning
             updated_memory, evolution = await engine.update_memory(memory_id, request.content)
 
+            # Get confidence from memory metadata (set during evolution)
+            confidence = updated_memory.metadata.get("evolution_confidence", 1.0)
+
             return UpdateMemoryResponse(
                 memory_id=updated_memory.id,
                 version=updated_memory.version,
@@ -395,17 +398,11 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
                 reasoning=evolution.change.reasoning if evolution.change else "",
                 previous_version_id=evolution.current_version,
                 new_version_id=evolution.new_version,
-                confidence=evolution.change.change_type if evolution.change else 1.0,
+                confidence=confidence,
             )
         else:
-            # Just metadata update
-            memory = await engine.get_memory(memory_id, validate=True)
-            if not memory:
-                raise HTTPException(status_code=404, detail="Memory not found")
-
-            if request.metadata:
-                memory.metadata.update(request.metadata)
-                await engine.graph_store.update_node(memory)
+            # Metadata-only update
+            memory = await engine.update_memory_metadata(memory_id, request.metadata or {})
 
             return UpdateMemoryResponse(
                 memory_id=memory.id,

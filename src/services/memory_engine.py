@@ -176,9 +176,12 @@ class MemoryEngine:
         """
         # Try graph store first (has full data)
         memory = await self.graph_store.get_node(memory_id)
+        vector_memory = await self.vector_store.get_memory(memory_id)
 
-        if not memory:
+        if not memory and not vector_memory:
             return None
+
+        memory.embedding = vector_memory.embedding if vector_memory else []
 
         # Validate on access if enabled
         if validate and self.config.llm_relationships.enable_auto_invalidation:
@@ -220,6 +223,29 @@ class MemoryEngine:
         updated_memory = await self.graph_store.get_node(memory_id)
         logger.info(f"Memory {evolution.action}: {memory_id}")
         return updated_memory, evolution
+
+    async def update_memory_metadata(self, memory_id: str, new_metadata: dict[str, Any]) -> Memory:
+        """
+        Update memory metadata.
+
+        Args:
+            memory_id: Memory to update
+            new_metadata: New metadata dictionary
+        """
+        logger.info(f"Updating metadata for memory: {memory_id}")
+
+        memory = await self.get_memory(memory_id, validate=True)
+        if not memory:
+            raise ValueError(f"Memory not found: {memory_id}")
+
+        # Update metadata
+        if new_metadata:
+            memory.metadata.update(new_metadata)
+            await self.graph_store.update_node(memory)
+            await self.sync_manager.sync_memory_full(memory)
+        logger.info(f"Metadata updated for memory: {memory_id}")
+
+        return memory
 
     async def delete_memory(self, memory_id: str) -> None:
         """
