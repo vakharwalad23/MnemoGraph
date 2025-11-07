@@ -8,6 +8,10 @@ import ollama
 from pydantic import BaseModel
 
 from src.core.llm.base import LLMProvider
+from src.utils.exceptions import LLMError, ValidationError
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class OllamaLLM(LLMProvider):
@@ -63,50 +67,55 @@ class OllamaLLM(LLMProvider):
             Pydantic model if response_format provided, else string
 
         Raises:
-            ValueError: If structured output parsing fails
+            ValidationError: If prompt is invalid or structured output parsing fails
+            LLMError: If Ollama API call fails
         """
-        options = {
-            "temperature": temperature,
-            "num_predict": max_tokens,
-            **kwargs.get("options", {}),
-        }
+        if not prompt or not prompt.strip():
+            raise ValidationError("Prompt cannot be empty")
 
-        # Handle structured output
-        format_type = None
-        messages = [{"role": "user", "content": prompt}]
+        try:
+            options = {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+                **kwargs.get("options", {}),
+            }
 
-        if response_format:
-            format_type = "json"
+            # Handle structured output
+            format_type = None
+            messages = [{"role": "user", "content": prompt}]
 
-            # Create simple example from schema instead of full schema
-            schema = response_format.model_json_schema()
+            if response_format:
+                format_type = "json"
 
-            # Build example JSON structure from schema properties
-            example = {}
-            properties = schema.get("properties", {})
+                # Create simple example from schema instead of full schema
+                schema = response_format.model_json_schema()
 
-            for field_name, field_info in properties.items():
-                field_type = field_info.get("type", "string")
+                # Build example JSON structure from schema properties
+                example = {}
+                properties = schema.get("properties", {})
 
-                # Create example values based on type
-                if field_type == "string":
-                    example[field_name] = f"<{field_name}>"
-                elif field_type == "number" or field_type == "integer":
-                    example[field_name] = (
-                        0.5 if "confidence" in field_name or "relevance" in field_name else 1
-                    )
-                elif field_type == "boolean":
-                    example[field_name] = True
-                elif field_type == "array":
-                    example[field_name] = []
-                elif field_type == "object":
-                    example[field_name] = {}
-                else:
-                    example[field_name] = None
+                for field_name, field_info in properties.items():
+                    field_type = field_info.get("type", "string")
 
-            example_str = json.dumps(example, indent=2)
+                    # Create example values based on type
+                    if field_type == "string":
+                        example[field_name] = f"<{field_name}>"
+                    elif field_type == "number" or field_type == "integer":
+                        example[field_name] = (
+                            0.5 if "confidence" in field_name or "relevance" in field_name else 1
+                        )
+                    elif field_type == "boolean":
+                        example[field_name] = True
+                    elif field_type == "array":
+                        example[field_name] = []
+                    elif field_type == "object":
+                        example[field_name] = {}
+                    else:
+                        example[field_name] = None
 
-            enhanced_prompt = f"""{prompt}
+                example_str = json.dumps(example, indent=2)
+
+                enhanced_prompt = f"""{prompt}
 
 You MUST respond with valid JSON matching this structure:
 {example_str}
@@ -117,45 +126,74 @@ IMPORTANT:
 - Return ONLY valid JSON, no markdown formatting or extra text
 - Do not return the schema itself, return actual data"""
 
-            messages = [{"role": "user", "content": enhanced_prompt}]
+                messages = [{"role": "user", "content": enhanced_prompt}]
 
-        # Make request
-        response = await self.client.chat(
-            model=self.model,
-            messages=messages,
-            format=format_type,
-            options=options,
-            **{k: v for k, v in kwargs.items() if k != "options"},
-        )
+            # Make request
+            response = await self.client.chat(
+                model=self.model,
+                messages=messages,
+                format=format_type,
+                options=options,
+                **{k: v for k, v in kwargs.items() if k != "options"},
+            )
 
-        content = response["message"]["content"]
+            if not response or "message" not in response or "content" not in response["message"]:
+                raise LLMError("Ollama returned invalid response structure")
 
-        # Parse structured output
-        if response_format:
-            try:
-                # Clean JSON if wrapped in markdown
-                cleaned = self._extract_json(content)
+            content = response["message"]["content"]
 
-                # Debug: Check if LLM returned schema instead of data
+            if not content:
+                raise LLMError("Ollama returned empty content")
+
+            # Parse structured output
+            if response_format:
                 try:
-                    parsed = json.loads(cleaned)
-                    if isinstance(parsed, dict) and "properties" in parsed and "type" in parsed:
-                        raise ValueError(
-                            "LLM returned the JSON schema instead of actual data. "
-                            "This usually means the prompt needs to be clearer about expecting actual values, not the schema definition."
-                        )
-                except json.JSONDecodeError:
-                    pass  # Will be caught below
+                    # Clean JSON if wrapped in markdown
+                    cleaned = self._extract_json(content)
 
-                return response_format.model_validate_json(cleaned)
-            except Exception as e:
-                raise ValueError(
-                    f"Failed to parse structured output: {e}\n"
-                    f"Raw response (first 500 chars): {content[:500]}\n"
-                    f"Expected format: {response_format.__name__}"
-                ) from e
+                    # Check if LLM returned schema instead of data
+                    try:
+                        parsed = json.loads(cleaned)
+                        if isinstance(parsed, dict) and "properties" in parsed and "type" in parsed:
+                            raise ValidationError(
+                                "LLM returned the JSON schema instead of actual data. "
+                                "This usually means the prompt needs to be clearer about expecting actual values, not the schema definition."
+                            )
+                    except json.JSONDecodeError:
+                        pass  # Will be caught below
 
-        return content
+                    return response_format.model_validate_json(cleaned)
+                except ValidationError:
+                    raise
+                except Exception as e:
+                    logger.error(
+                        f"Failed to parse Ollama structured output: {e}",
+                        extra={
+                            "model": self.model,
+                            "expected_format": response_format.__name__,
+                            "error": str(e),
+                        },
+                    )
+                    raise ValidationError(
+                        f"Failed to parse structured output: {e}\n"
+                        f"Raw response (first 500 chars): {content[:500]}\n"
+                        f"Expected format: {response_format.__name__}"
+                    ) from e
+
+            return content
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"Ollama API error: {e}",
+                extra={
+                    "model": self.model,
+                    "host": self.host,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+            )
+            raise LLMError(f"Ollama API error: {e}") from e
 
     def _extract_json(self, content: str) -> str:
         """

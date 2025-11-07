@@ -7,6 +7,10 @@ import asyncio
 import ollama
 
 from src.core.embeddings.base import Embedder
+from src.utils.exceptions import EmbeddingError, ValidationError
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class OllamaEmbedder(Embedder):
@@ -49,10 +53,29 @@ class OllamaEmbedder(Embedder):
 
         Returns:
             Embedding vector as list of floats
-        """
-        response = await self.client.embeddings(model=self.model, prompt=text, **kwargs)
 
-        return response["embedding"]
+        Raises:
+            ValidationError: If text is invalid
+            EmbeddingError: If Ollama embedding fails
+        """
+        if not text or not text.strip():
+            raise ValidationError("Text cannot be empty")
+
+        try:
+            response = await self.client.embeddings(model=self.model, prompt=text, **kwargs)
+
+            if not response or "embedding" not in response:
+                raise EmbeddingError("Ollama returned invalid embedding response")
+
+            return response["embedding"]
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"Ollama embedding error: {e}",
+                extra={"model": self.model, "host": self.host, "error": str(e)},
+            )
+            raise EmbeddingError(f"Ollama embedding error: {e}") from e
 
     async def batch_embed(
         self, texts: list[str], batch_size: int = 32, **kwargs

@@ -16,7 +16,12 @@ class GraphStore(ABC):
 
     @abstractmethod
     async def initialize(self) -> None:
-        """Initialize the graph store (create tables/schema)."""
+        """
+        Initialize the graph store (create tables/schema).
+
+        Raises:
+            GraphStoreError: If initialization fails
+        """
         pass
 
     # NODE OPERATIONS (Memory nodes)
@@ -28,6 +33,10 @@ class GraphStore(ABC):
 
         Args:
             memory: Memory object to store
+
+        Raises:
+            ValidationError: If memory is invalid
+            GraphStoreError: If add operation fails
         """
         pass
 
@@ -41,6 +50,10 @@ class GraphStore(ABC):
 
         Returns:
             Memory or None if not found
+
+        Raises:
+            ValidationError: If node_id is invalid
+            GraphStoreError: If retrieval operation fails
         """
         pass
 
@@ -61,6 +74,10 @@ class GraphStore(ABC):
 
         Args:
             node_id: Node identifier
+
+        Raises:
+            ValidationError: If node_id is invalid
+            GraphStoreError: If deletion operation fails
         """
         pass
 

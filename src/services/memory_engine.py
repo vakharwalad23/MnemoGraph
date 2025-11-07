@@ -24,6 +24,15 @@ from src.services.invalidation_manager import InvalidationManager
 from src.services.llm_relationship_engine import LLMRelationshipEngine
 from src.services.memory_evolution import MemoryEvolutionService
 from src.services.memory_sync import MemorySyncManager
+from src.utils.exceptions import (
+    EmbeddingError,
+    GraphStoreError,
+    MemoryError,
+    NotFoundError,
+    SyncError,
+    ValidationError,
+    VectorStoreError,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -134,34 +143,68 @@ class MemoryEngine:
 
         Returns:
             Tuple of (Memory, RelationshipBundle)
+        Raises:
+            ValidationError: If content is invalid
+            EmbeddingError: If embedding generation fails
+            MemoryError: If memory creation fails
         """
-        logger.info(f"Adding memory: {content[:50]}")
-
-        # Generate embedding
-        logger.debug("Generating embedding")
-        embedding = await self.embedder.embed(content)
-
-        # Create memory object
-        memory = Memory(
-            id=self._generate_id(),
-            content=content,
-            type=memory_type,
-            embedding=embedding,
-            metadata=metadata or {},
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-        )
-
-        # Process with relationship engine (handles graph + vector store)
-        logger.debug("Extracting relationships")
-        extraction = await self.relationship_engine.process_new_memory(memory)
+        if not content or not content.strip():
+            raise ValidationError("Memory content cannot be empty")
 
         logger.info(
-            f"Memory added: {memory.id}, relationships: {len(extraction.relationships)}, "
-            f"derived insights: {len(extraction.derived_insights)}"
+            f"Adding memory: {content[:50]}",
+            extra={"operation": "add_memory", "memory_type": memory_type.value},
         )
 
-        return memory, extraction
+        try:
+            # Generate embedding
+            logger.debug("Generating embedding")
+            embedding = await self.embedder.embed(content)
+        except Exception as e:
+            logger.error(
+                f"Failed to generate embedding: {e}",
+                extra={"operation": "add_memory", "error": str(e)},
+            )
+            raise EmbeddingError(f"Failed to generate embedding: {e}") from e
+
+        try:
+            # Create memory object
+            memory = Memory(
+                id=self._generate_id(),
+                content=content,
+                type=memory_type,
+                embedding=embedding,
+                metadata=metadata or {},
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+            )
+
+            # Process with relationship engine (handles graph + vector store)
+            logger.debug("Extracting relationships")
+            extraction = await self.relationship_engine.process_new_memory(memory)
+
+            logger.info(
+                f"Memory added: {memory.id}",
+                extra={
+                    "memory_id": memory.id,
+                    "relationships": len(extraction.relationships),
+                    "derived_insights": len(extraction.derived_insights),
+                },
+            )
+
+            return memory, extraction
+        except (GraphStoreError, VectorStoreError, SyncError) as e:
+            logger.error(
+                f"Failed to add memory: {e}",
+                extra={"operation": "add_memory", "error": str(e), "error_type": type(e).__name__},
+            )
+            raise MemoryError(f"Failed to add memory: {e}") from e
+        except Exception as e:
+            logger.error(
+                f"Unexpected error adding memory: {e}",
+                extra={"operation": "add_memory", "error": str(e)},
+            )
+            raise MemoryError(f"Unexpected error adding memory: {e}") from e
 
     async def get_memory(self, memory_id: str, validate: bool = True) -> Memory | None:
         """
@@ -173,21 +216,45 @@ class MemoryEngine:
 
         Returns:
             Memory or None if not found
+        Raises:
+            ValidationError: If memory_id is invalid
+            GraphStoreError: If graph store operation fails
+            VectorStoreError: If vector store operation fails
         """
-        # Try graph store first (has full data)
-        memory = await self.graph_store.get_node(memory_id)
-        vector_memory = await self.vector_store.get_memory(memory_id)
+        if not memory_id:
+            raise ValidationError("memory_id is required")
 
-        if not memory and not vector_memory:
-            return None
+        try:
+            # Try graph store first (has full data)
+            memory = await self.graph_store.get_node(memory_id)
+            vector_memory = await self.vector_store.get_memory(memory_id)
 
-        memory.embedding = vector_memory.embedding if vector_memory else []
+            if not memory and not vector_memory:
+                logger.debug(
+                    f"Memory not found: {memory_id}",
+                    extra={"memory_id": memory_id, "operation": "get_memory"},
+                )
+                return None
 
-        # Validate on access if enabled
-        if validate and self.config.llm_relationships.enable_auto_invalidation:
-            memory = await self.invalidation.validate_on_access(memory)
+            memory.embedding = vector_memory.embedding if vector_memory else []
 
-        return memory
+            # Validate on access if enabled
+            if validate and self.config.llm_relationships.enable_auto_invalidation:
+                memory = await self.invalidation.validate_on_access(memory)
+
+            return memory
+        except (GraphStoreError, VectorStoreError) as e:
+            logger.error(
+                f"Error getting memory {memory_id}: {e}",
+                extra={"memory_id": memory_id, "operation": "get_memory", "error": str(e)},
+            )
+            raise
+        except Exception as e:
+            logger.error(
+                f"Unexpected error getting memory {memory_id}: {e}",
+                extra={"memory_id": memory_id, "operation": "get_memory", "error": str(e)},
+            )
+            raise MemoryError(f"Failed to get memory: {e}") from e
 
     async def update_memory(
         self, memory_id: str, new_content: str
@@ -201,28 +268,60 @@ class MemoryEngine:
 
         Returns:
             Tuple of (updated_memory, evolution_result)
+        Raises:
+            ValidationError: If inputs are invalid
+            NotFoundError: If memory not found
+            MemoryError: If update fails
         """
-        logger.info(f"Updating memory: {memory_id}")
+        if not memory_id:
+            raise ValidationError("memory_id is required")
+        if not new_content or not new_content.strip():
+            raise ValidationError("new_content cannot be empty")
 
-        # Get current memory
-        current = await self.graph_store.get_node(memory_id)
-        if not current:
-            raise ValueError(f"Memory not found: {memory_id}")
+        logger.info(
+            f"Updating memory: {memory_id}",
+            extra={"memory_id": memory_id, "operation": "update_memory"},
+        )
 
-        # Evolve memory (Phase 2)
-        # Note: evolution service handles all graph + vector store updates internally
-        evolution = await self.evolution.evolve_memory(current, new_content)
+        try:
+            # Get current memory
+            current = await self.graph_store.get_node(memory_id)
+            if not current:
+                raise NotFoundError(f"Memory not found: {memory_id}")
 
-        # If new version created, retrieve it
-        if evolution.new_version:
-            new_memory = await self.graph_store.get_node(evolution.new_version)
-            logger.info(f"Memory updated with new version: {evolution.new_version}")
-            return new_memory, evolution
+            # Evolve memory (Phase 2)
+            evolution = await self.evolution.evolve_memory(current, new_content)
 
-        # For augment or preserve, return the current memory
-        updated_memory = await self.graph_store.get_node(memory_id)
-        logger.info(f"Memory {evolution.action}: {memory_id}")
-        return updated_memory, evolution
+            # If new version created, retrieve it
+            if evolution.new_version:
+                new_memory = await self.graph_store.get_node(evolution.new_version)
+                logger.info(
+                    "Memory updated with new version",
+                    extra={"memory_id": memory_id, "new_version": evolution.new_version},
+                )
+                return new_memory, evolution
+
+            # For augment or preserve, return the current memory
+            updated_memory = await self.graph_store.get_node(memory_id)
+            logger.info(
+                f"Memory {evolution.action}",
+                extra={"memory_id": memory_id, "action": evolution.action},
+            )
+            return updated_memory, evolution
+        except (NotFoundError, ValidationError):
+            raise
+        except (GraphStoreError, VectorStoreError, SyncError) as e:
+            logger.error(
+                f"Failed to update memory {memory_id}: {e}",
+                extra={"memory_id": memory_id, "error": str(e), "error_type": type(e).__name__},
+            )
+            raise MemoryError(f"Failed to update memory: {e}") from e
+        except Exception as e:
+            logger.error(
+                f"Unexpected error updating memory {memory_id}: {e}",
+                extra={"memory_id": memory_id, "error": str(e)},
+            )
+            raise MemoryError(f"Unexpected error updating memory: {e}") from e
 
     async def update_memory_metadata(self, memory_id: str, new_metadata: dict[str, Any]) -> Memory:
         """
@@ -231,21 +330,53 @@ class MemoryEngine:
         Args:
             memory_id: Memory to update
             new_metadata: New metadata dictionary
+
+        Returns:
+            Updated memory
+        Raises:
+            ValidationError: If inputs are invalid
+            NotFoundError: If memory not found
+            MemoryError: If update fails
         """
-        logger.info(f"Updating metadata for memory: {memory_id}")
+        if not memory_id:
+            raise ValidationError("memory_id is required")
+        if not isinstance(new_metadata, dict):
+            raise ValidationError("new_metadata must be a dictionary")
 
-        memory = await self.get_memory(memory_id, validate=True)
-        if not memory:
-            raise ValueError(f"Memory not found: {memory_id}")
+        logger.info(
+            f"Updating metadata for memory: {memory_id}",
+            extra={"memory_id": memory_id, "operation": "update_metadata"},
+        )
 
-        # Update metadata
-        if new_metadata:
-            memory.metadata.update(new_metadata)
-            await self.graph_store.update_node(memory)
-            await self.sync_manager.sync_memory_full(memory)
-        logger.info(f"Metadata updated for memory: {memory_id}")
+        try:
+            memory = await self.get_memory(memory_id, validate=True)
+            if not memory:
+                raise NotFoundError(f"Memory not found: {memory_id}")
 
-        return memory
+            # Update metadata
+            if new_metadata:
+                memory.metadata.update(new_metadata)
+                memory.updated_at = datetime.now()
+                await self.graph_store.update_node(memory)
+                await self.sync_manager.sync_memory_full(memory)
+
+            logger.info(f"Metadata updated for memory: {memory_id}", extra={"memory_id": memory_id})
+
+            return memory
+        except (NotFoundError, ValidationError):
+            raise
+        except (GraphStoreError, VectorStoreError, SyncError) as e:
+            logger.error(
+                f"Failed to update metadata for {memory_id}: {e}",
+                extra={"memory_id": memory_id, "error": str(e), "error_type": type(e).__name__},
+            )
+            raise MemoryError(f"Failed to update metadata: {e}") from e
+        except Exception as e:
+            logger.error(
+                f"Unexpected error updating metadata for {memory_id}: {e}",
+                extra={"memory_id": memory_id, "error": str(e)},
+            )
+            raise MemoryError(f"Unexpected error updating metadata: {e}") from e
 
     async def delete_memory(self, memory_id: str) -> None:
         """
@@ -253,16 +384,38 @@ class MemoryEngine:
 
         Args:
             memory_id: Memory to delete
+        Raises:
+            ValidationError: If memory_id is invalid
+            MemoryError: If deletion fails
         """
-        logger.info(f"Deleting memory: {memory_id}")
+        if not memory_id:
+            raise ValidationError("memory_id is required")
 
-        # Delete from graph store first (source of truth)
-        await self.graph_store.delete_node(memory_id)
+        logger.info(
+            f"Deleting memory: {memory_id}",
+            extra={"memory_id": memory_id, "operation": "delete_memory"},
+        )
 
-        # Sync deletion to vector store
-        await self.sync_manager.sync_memory_deletion(memory_id)
+        try:
+            # Delete from graph store first (source of truth)
+            await self.graph_store.delete_node(memory_id)
 
-        logger.info(f"Memory deleted: {memory_id}")
+            # Sync deletion to vector store
+            await self.sync_manager.sync_memory_deletion(memory_id)
+
+            logger.info(f"Memory deleted: {memory_id}", extra={"memory_id": memory_id})
+        except (GraphStoreError, VectorStoreError, SyncError) as e:
+            logger.error(
+                f"Failed to delete memory {memory_id}: {e}",
+                extra={"memory_id": memory_id, "error": str(e), "error_type": type(e).__name__},
+            )
+            raise MemoryError(f"Failed to delete memory: {e}") from e
+        except Exception as e:
+            logger.error(
+                f"Unexpected error deleting memory {memory_id}: {e}",
+                extra={"memory_id": memory_id, "error": str(e)},
+            )
+            raise MemoryError(f"Unexpected error deleting memory: {e}") from e
 
     # SEARCH & QUERY OPERATIONS
 

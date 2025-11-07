@@ -9,20 +9,15 @@ Handles:
 """
 
 import asyncio
-import logging
 from typing import Any
 
 from src.core.graph_store.base import GraphStore
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory
+from src.utils.exceptions import GraphStoreError, SyncError, VectorStoreError
+from src.utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
-
-
-class SyncError(Exception):
-    """Raised when synchronization fails after retries."""
-
-    pass
+logger = get_logger(__name__)
 
 
 class MemorySyncManager:
@@ -90,20 +85,48 @@ class MemorySyncManager:
         for attempt in range(self.max_retries):
             try:
                 return await operation()
-            except Exception as e:
+            except (GraphStoreError, VectorStoreError) as e:
+                # Store-specific errors are retryable
                 last_error = e
                 if attempt < self.max_retries - 1:
-                    delay = self.retry_delay * (2**attempt)  # Exponential backoff
+                    delay = self.retry_delay * (2**attempt)
                     logger.warning(
                         f"{operation_name} failed (attempt {attempt + 1}/{self.max_retries}): {e}. "
-                        f"Retrying in {delay}s..."
+                        f"Retrying in {delay}s...",
+                        extra={
+                            "operation": operation_name,
+                            "attempt": attempt + 1,
+                            "error_type": type(e).__name__,
+                        },
                     )
                     await asyncio.sleep(delay)
                 else:
-                    logger.error(f"{operation_name} failed after {self.max_retries} attempts: {e}")
+                    logger.error(
+                        f"{operation_name} failed after {self.max_retries} attempts",
+                        extra={
+                            "operation": operation_name,
+                            "error": str(e),
+                            "error_type": type(e).__name__,
+                        },
+                    )
+            except Exception as e:
+                # Unexpected errors should not be retried
+                logger.error(
+                    f"{operation_name} failed with unexpected error: {e}",
+                    extra={
+                        "operation": operation_name,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    },
+                )
+                raise SyncError(
+                    f"{operation_name} failed: {e}",
+                    context={"operation": operation_name, "error_type": type(e).__name__},
+                ) from e
 
         raise SyncError(
-            f"{operation_name} failed after {self.max_retries} attempts: {last_error}"
+            f"{operation_name} failed after {self.max_retries} attempts: {last_error}",
+            context={"operation": operation_name, "max_retries": self.max_retries},
         ) from last_error
 
     async def sync_memory_status(self, memory: Memory) -> None:
@@ -160,25 +183,45 @@ class MemorySyncManager:
 
         Raises:
             SyncError: If sync fails after retries or if embedding cannot be found
+            VectorStoreError: If vector store operations fail
         """
         # If embedding is missing or empty, try to get it from vector store
         if not memory.embedding or len(memory.embedding) == 0:
             logger.debug(
-                f"Embedding missing for {memory.id}, attempting to retrieve from vector store"
+                f"Embedding missing for {memory.id}, attempting to retrieve from vector store",
+                extra={"memory_id": memory.id, "operation": "sync_memory_full"},
             )
-            vector_memory = await self.vector_store.get_memory(memory.id)
-            if vector_memory and vector_memory.embedding and len(vector_memory.embedding) > 0:
-                memory.embedding = vector_memory.embedding
-                logger.debug(f"Retrieved embedding for {memory.id} from vector store")
-            else:
+            try:
+                vector_memory = await self.vector_store.get_memory(memory.id)
+                if vector_memory and vector_memory.embedding and len(vector_memory.embedding) > 0:
+                    memory.embedding = vector_memory.embedding
+                    logger.debug(
+                        f"Retrieved embedding for {memory.id} from vector store",
+                        extra={"memory_id": memory.id},
+                    )
+                else:
+                    raise SyncError(
+                        f"Cannot sync {memory.id}: no embedding found. "
+                        "Memory needs to be re-embedded with embedder.embed() before syncing.",
+                        context={"memory_id": memory.id, "operation": "sync_memory_full"},
+                    )
+            except VectorStoreError as e:
                 raise SyncError(
-                    f"Cannot sync {memory.id}: no embedding found. "
-                    "Memory needs to be re-embedded with embedder.embed() before syncing."
-                )
+                    f"Failed to retrieve embedding for {memory.id}: {e}",
+                    context={"memory_id": memory.id, "operation": "retrieve_embedding"},
+                ) from e
 
         async def _sync():
-            await self.vector_store.upsert_memory(memory)
-            logger.debug(f"Synced memory {memory.id} (status: {memory.status.value})")
+            try:
+                await self.vector_store.upsert_memory(memory)
+                logger.debug(
+                    f"Synced memory {memory.id}",
+                    extra={"memory_id": memory.id, "status": memory.status.value},
+                )
+            except Exception as e:
+                raise VectorStoreError(
+                    f"Failed to upsert memory {memory.id}: {e}", context={"memory_id": memory.id}
+                ) from e
 
         await self._retry_operation(_sync, f"sync_memory_full({memory.id})")
 
@@ -191,11 +234,20 @@ class MemorySyncManager:
 
         Raises:
             SyncError: If sync fails after retries
+            VectorStoreError: If vector store deletion fails
         """
 
         async def _sync():
-            await self.vector_store.delete_memory(memory_id)
-            logger.debug(f"Synced deletion for {memory_id}")
+            try:
+                await self.vector_store.delete_memory(memory_id)
+                logger.debug(
+                    f"Synced deletion for {memory_id}",
+                    extra={"memory_id": memory_id, "operation": "delete"},
+                )
+            except Exception as e:
+                raise VectorStoreError(
+                    f"Failed to delete memory {memory_id}: {e}", context={"memory_id": memory_id}
+                ) from e
 
         await self._retry_operation(_sync, f"sync_memory_deletion({memory_id})")
 
@@ -220,10 +272,14 @@ class MemorySyncManager:
             except SyncError as e:
                 results["failed"] += 1
                 results["errors"].append({"memory_id": memory.id, "error": str(e)})
-                logger.error(f"Batch sync failed for {memory.id}: {e}")
+                logger.error(
+                    f"Batch sync failed for {memory.id}",
+                    extra={"memory_id": memory.id, "error": str(e), "operation": "batch_sync"},
+                )
 
         logger.info(
-            f"Batch sync completed: {results['success']} success, {results['failed']} failed"
+            f"Batch sync completed: {results['success']} success, {results['failed']} failed",
+            extra={"success_count": results["success"], "failed_count": results["failed"]},
         )
         return results
 

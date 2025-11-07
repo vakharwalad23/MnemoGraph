@@ -29,7 +29,8 @@ class Embedder(ABC):
             List of floats representing the embedding vector
 
         Raises:
-            Exception: Provider-specific errors
+            ValidationError: If text is invalid
+            EmbeddingError: If embedding generation fails
         """
         pass
 

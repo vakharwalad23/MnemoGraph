@@ -41,8 +41,8 @@ class LLMProvider(ABC):
             Pydantic model instance if response_format provided, else string
 
         Raises:
-            ValueError: If structured output parsing fails
-            Exception: Provider-specific errors
+            LLMError: If LLM operation fails
+            ValidationError: If structured output parsing fails
         """
         pass
 

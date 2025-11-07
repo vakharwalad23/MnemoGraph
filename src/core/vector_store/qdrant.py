@@ -27,6 +27,10 @@ from qdrant_client.models import (
 
 from src.core.vector_store.base import SearchResult, VectorStore
 from src.models.memory import Memory, MemoryStatus, NodeType
+from src.utils.exceptions import ValidationError, VectorStoreError
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class QdrantStore(VectorStore):
@@ -99,73 +103,97 @@ class QdrantStore(VectorStore):
             return str(uuid5(NAMESPACE_DNS, id_str))
 
     async def connect(self) -> None:
-        """Establish connection to Qdrant."""
+        """
+        Establish connection to Qdrant.
+
+        Raises:
+            VectorStoreError: If connection fails
+        """
         if self.client is None:
-            self.client = AsyncQdrantClient(
-                host=self.host,
-                port=self.port,
-                prefer_grpc=self.use_grpc,
-                timeout=30,
-            )
+            try:
+                self.client = AsyncQdrantClient(
+                    host=self.host,
+                    port=self.port,
+                    prefer_grpc=self.use_grpc,
+                    timeout=30,
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to connect to Qdrant: {e}",
+                    extra={"host": self.host, "port": self.port, "error": str(e)},
+                )
+                raise VectorStoreError(f"Failed to connect to Qdrant: {e}") from e
 
     async def initialize(self) -> None:
-        """Initialize the collection with optimized settings."""
-        await self.connect()
+        """
+        Initialize the collection with optimized settings.
 
-        collections = await self.client.get_collections()
-        collection_names = [col.name for col in collections.collections]
+        Raises:
+            VectorStoreError: If initialization fails
+        """
+        try:
+            await self.connect()
 
-        if self.collection_name not in collection_names:
-            # Create with optimized settings
-            vectors_config = VectorParams(
-                size=self.vector_size,
-                distance=Distance.COSINE,
-                # HNSW indexing for fast search
-                hnsw_config=HnswConfigDiff(
-                    m=self.hnsw_m,
-                    ef_construct=self.hnsw_ef_construct,
-                    full_scan_threshold=10000,
-                ),
-                on_disk=self.on_disk,
-            )
+            collections = await self.client.get_collections()
+            collection_names = [col.name for col in collections.collections]
 
-            # Add quantization if enabled
-            if self.use_quantization:
-                vectors_config.quantization_config = ScalarQuantization(
-                    scalar=ScalarQuantizationConfig(
-                        type=ScalarType.INT8,
-                        quantile=0.99,
-                        always_ram=True,
-                    )
+            if self.collection_name not in collection_names:
+                # Create with optimized settings
+                vectors_config = VectorParams(
+                    size=self.vector_size,
+                    distance=Distance.COSINE,
+                    # HNSW indexing for fast search
+                    hnsw_config=HnswConfigDiff(
+                        m=self.hnsw_m,
+                        ef_construct=self.hnsw_ef_construct,
+                        full_scan_threshold=10000,
+                    ),
+                    on_disk=self.on_disk,
                 )
 
-            await self.client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=vectors_config,
-                optimizers_config=OptimizersConfigDiff(
-                    indexing_threshold=20000,
-                    memmap_threshold=50000,
-                ),
-            )
+                # Add quantization if enabled
+                if self.use_quantization:
+                    vectors_config.quantization_config = ScalarQuantization(
+                        scalar=ScalarQuantizationConfig(
+                            type=ScalarType.INT8,
+                            quantile=0.99,
+                            always_ram=True,
+                        )
+                    )
 
-            # Create payload indices for fast filtering
-            await self.client.create_payload_index(
-                collection_name=self.collection_name,
-                field_name="status",
-                field_schema="keyword",
-            )
+                await self.client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=vectors_config,
+                    optimizers_config=OptimizersConfigDiff(
+                        indexing_threshold=20000,
+                        memmap_threshold=50000,
+                    ),
+                )
 
-            await self.client.create_payload_index(
-                collection_name=self.collection_name,
-                field_name="type",
-                field_schema="keyword",
-            )
+                # Create payload indices for fast filtering
+                await self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="status",
+                    field_schema="keyword",
+                )
 
-            await self.client.create_payload_index(
-                collection_name=self.collection_name,
-                field_name="created_at",
-                field_schema="datetime",
+                await self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="type",
+                    field_schema="keyword",
+                )
+
+                await self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="created_at",
+                    field_schema="datetime",
+                )
+        except Exception as e:
+            logger.error(
+                f"Failed to initialize Qdrant collection: {e}",
+                extra={"collection": self.collection_name, "error": str(e)},
             )
+            raise VectorStoreError(f"Failed to initialize Qdrant collection: {e}") from e
 
     def _memory_to_payload(self, memory: Memory) -> dict[str, Any]:
         """
@@ -241,23 +269,43 @@ class QdrantStore(VectorStore):
 
         Args:
             memory: Memory object with embedding
+
+        Raises:
+            ValidationError: If memory is invalid
+            VectorStoreError: If upsert operation fails
         """
-        await self.connect()
+        if not memory:
+            raise ValidationError("Memory cannot be None")
+        if not memory.id:
+            raise ValidationError("Memory ID cannot be empty")
+        if not memory.embedding or len(memory.embedding) == 0:
+            raise ValidationError("Memory must have an embedding")
 
-        uuid_id = self._to_uuid(memory.id)
-        payload = self._memory_to_payload(memory)
+        try:
+            await self.connect()
 
-        point = PointStruct(
-            id=uuid_id,
-            vector=memory.embedding,
-            payload=payload,
-        )
+            uuid_id = self._to_uuid(memory.id)
+            payload = self._memory_to_payload(memory)
 
-        await self.client.upsert(
-            collection_name=self.collection_name,
-            points=[point],
-            wait=True,  # Wait for write to complete for consistency
-        )
+            point = PointStruct(
+                id=uuid_id,
+                vector=memory.embedding,
+                payload=payload,
+            )
+
+            await self.client.upsert(
+                collection_name=self.collection_name,
+                points=[point],
+                wait=True,  # Wait for write to complete for consistency
+            )
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"Failed to upsert memory {memory.id}: {e}",
+                extra={"memory_id": memory.id, "error": str(e)},
+            )
+            raise VectorStoreError(f"Failed to upsert memory: {e}") from e
 
     async def batch_upsert(self, memories: list[Memory], batch_size: int = 100) -> None:
         """
@@ -438,22 +486,38 @@ class QdrantStore(VectorStore):
 
         Returns:
             Memory or None if not found
+
+        Raises:
+            ValidationError: If memory_id is invalid
+            VectorStoreError: If retrieval operation fails
         """
-        await self.connect()
+        if not memory_id or not memory_id.strip():
+            raise ValidationError("Memory ID cannot be empty")
 
-        uuid_id = self._to_uuid(memory_id)
+        try:
+            await self.connect()
 
-        results = await self.client.retrieve(
-            collection_name=self.collection_name,
-            ids=[uuid_id],
-            with_vectors=True,
-        )
+            uuid_id = self._to_uuid(memory_id)
 
-        if not results:
-            return None
+            results = await self.client.retrieve(
+                collection_name=self.collection_name,
+                ids=[uuid_id],
+                with_vectors=True,
+            )
 
-        point = results[0]
-        return self._payload_to_memory(point.payload, point.vector)
+            if not results:
+                return None
+
+            point = results[0]
+            return self._payload_to_memory(point.payload, point.vector)
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"Failed to retrieve memory {memory_id}: {e}",
+                extra={"memory_id": memory_id, "error": str(e)},
+            )
+            raise VectorStoreError(f"Failed to retrieve memory: {e}") from e
 
     async def delete_memory(self, memory_id: str) -> None:
         """
@@ -461,16 +525,32 @@ class QdrantStore(VectorStore):
 
         Args:
             memory_id: Memory identifier
+
+        Raises:
+            ValidationError: If memory_id is invalid
+            VectorStoreError: If deletion operation fails
         """
-        await self.connect()
+        if not memory_id or not memory_id.strip():
+            raise ValidationError("Memory ID cannot be empty")
 
-        uuid_id = self._to_uuid(memory_id)
+        try:
+            await self.connect()
 
-        await self.client.delete(
-            collection_name=self.collection_name,
-            points_selector=[uuid_id],
-            wait=True,  # Wait for delete to complete for consistency
-        )
+            uuid_id = self._to_uuid(memory_id)
+
+            await self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=[uuid_id],
+                wait=True,  # Wait for delete to complete for consistency
+            )
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"Failed to delete memory {memory_id}: {e}",
+                extra={"memory_id": memory_id, "error": str(e)},
+            )
+            raise VectorStoreError(f"Failed to delete memory: {e}") from e
 
     async def count_memories(self, filters: dict[str, Any] | None = None) -> int:
         """

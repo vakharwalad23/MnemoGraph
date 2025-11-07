@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.core.embeddings.openai import OpenAIEmbedder
+from src.utils.exceptions import ValidationError
 
 
 @pytest.fixture
@@ -124,8 +125,8 @@ class TestOpenAIEmbedder:
 
     async def test_batch_embed_empty_list(self, openai_embedder):
         """Test batch embedding with empty list."""
-        results = await openai_embedder.batch_embed([])
-        assert results == []
+        with pytest.raises(ValidationError, match="Texts list cannot be empty"):
+            await openai_embedder.batch_embed([])
 
     async def test_get_dimension_known_model(self, openai_embedder):
         """Test get_dimension for known model."""

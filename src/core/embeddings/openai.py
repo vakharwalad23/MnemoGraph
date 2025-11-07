@@ -5,6 +5,10 @@ OpenAI embedder using official SDK.
 from openai import AsyncOpenAI
 
 from src.core.embeddings.base import Embedder
+from src.utils.exceptions import EmbeddingError, ValidationError
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class OpenAIEmbedder(Embedder):
@@ -56,10 +60,29 @@ class OpenAIEmbedder(Embedder):
 
         Returns:
             Embedding vector as list of floats
-        """
-        response = await self.client.embeddings.create(model=self.model, input=text, **kwargs)
 
-        return response.data[0].embedding
+        Raises:
+            ValidationError: If text is invalid
+            EmbeddingError: If OpenAI API call fails
+        """
+        if not text or not text.strip():
+            raise ValidationError("Text cannot be empty")
+
+        try:
+            response = await self.client.embeddings.create(model=self.model, input=text, **kwargs)
+
+            if not response.data or len(response.data) == 0:
+                raise EmbeddingError("OpenAI returned empty embedding response")
+
+            return response.data[0].embedding
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"OpenAI embedding error: {e}",
+                extra={"model": self.model, "error": str(e), "error_type": type(e).__name__},
+            )
+            raise EmbeddingError(f"OpenAI embedding error: {e}") from e
 
     async def batch_embed(
         self, texts: list[str], batch_size: int = 2048, **kwargs
@@ -76,20 +99,46 @@ class OpenAIEmbedder(Embedder):
 
         Returns:
             List of embedding vectors
+
+        Raises:
+            ValidationError: If texts list is invalid
+            EmbeddingError: If batch embedding fails
         """
-        embeddings = []
+        if not texts:
+            raise ValidationError("Texts list cannot be empty")
 
-        # Process in batches
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
+        try:
+            embeddings = []
 
-            response = await self.client.embeddings.create(model=self.model, input=batch, **kwargs)
+            # Process in batches
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i : i + batch_size]
 
-            # Extract embeddings (response.data is already ordered)
-            batch_embeddings = [item.embedding for item in response.data]
-            embeddings.extend(batch_embeddings)
+                response = await self.client.embeddings.create(
+                    model=self.model, input=batch, **kwargs
+                )
 
-        return embeddings
+                if not response.data:
+                    raise EmbeddingError("OpenAI returned empty batch embedding response")
+
+                # Extract embeddings (response.data is already ordered)
+                batch_embeddings = [item.embedding for item in response.data]
+                embeddings.extend(batch_embeddings)
+
+            return embeddings
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"OpenAI batch embedding error: {e}",
+                extra={
+                    "model": self.model,
+                    "batch_size": batch_size,
+                    "num_texts": len(texts),
+                    "error": str(e),
+                },
+            )
+            raise EmbeddingError(f"OpenAI batch embedding error: {e}") from e
 
     async def get_dimension(self) -> int:
         """

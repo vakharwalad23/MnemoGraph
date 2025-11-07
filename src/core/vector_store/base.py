@@ -25,7 +25,12 @@ class VectorStore(ABC):
 
     @abstractmethod
     async def initialize(self) -> None:
-        """Initialize the vector store (create collections/indices)."""
+        """
+        Initialize the vector store (create collections/indices).
+
+        Raises:
+            VectorStoreError: If initialization fails
+        """
         pass
 
     @abstractmethod
@@ -35,6 +40,10 @@ class VectorStore(ABC):
 
         Args:
             memory: Memory object with embedding
+
+        Raises:
+            ValidationError: If memory is invalid
+            VectorStoreError: If upsert operation fails
         """
         pass
 
@@ -98,6 +107,10 @@ class VectorStore(ABC):
 
         Returns:
             Memory or None if not found
+
+        Raises:
+            ValidationError: If memory_id is invalid
+            VectorStoreError: If retrieval operation fails
         """
         pass
 
@@ -108,6 +121,10 @@ class VectorStore(ABC):
 
         Args:
             memory_id: Memory identifier
+
+        Raises:
+            ValidationError: If memory_id is invalid
+            VectorStoreError: If deletion operation fails
         """
         pass
 

@@ -6,6 +6,10 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from src.core.llm.base import LLMProvider
+from src.utils.exceptions import LLMError, ValidationError
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class OpenAILLM(LLMProvider):
@@ -58,10 +62,15 @@ class OpenAILLM(LLMProvider):
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature
             **kwargs: Additional parameters (e.g., stop, presence_penalty)
-
         Returns:
             Pydantic model if response_format provided, else string
+        Raises:
+            LLMError: If OpenAI API call fails
+            ValidationError: If structured output parsing fails
         """
+        if not prompt or not prompt.strip():
+            raise ValidationError("Prompt cannot be empty")
+
         messages = [{"role": "user", "content": prompt}]
 
         params = {
@@ -72,18 +81,36 @@ class OpenAILLM(LLMProvider):
             **kwargs,
         }
 
-        # Use structured outputs if response format provided
-        if response_format:
-            # OpenAI's native structured output support (Parse API)
-            response = await self.client.beta.chat.completions.parse(
-                **params, response_format=response_format
+        try:
+            # Use structured outputs if response format provided
+            if response_format:
+                # OpenAI's native structured output support (Parse API)
+                response = await self.client.beta.chat.completions.parse(
+                    **params, response_format=response_format
+                )
+
+                parsed = response.choices[0].message.parsed
+                if not parsed:
+                    raise ValidationError("OpenAI returned empty parsed response")
+
+                return parsed
+
+            # Regular completion
+            response = await self.client.chat.completions.create(**params)
+            content = response.choices[0].message.content
+
+            if not content:
+                raise LLMError("OpenAI returned empty content")
+
+            return content
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"OpenAI API error: {e}",
+                extra={"model": self.model, "error": str(e), "error_type": type(e).__name__},
             )
-
-            return response.choices[0].message.parsed
-
-        # Regular completion
-        response = await self.client.chat.completions.create(**params)
-        return response.choices[0].message.content
+            raise LLMError(f"OpenAI API error: {e}") from e
 
     async def close(self):
         """Close OpenAI client."""
