@@ -4,11 +4,11 @@
 
 MnemoGraph is a memory management system that leverages Large Language Models to understand and connect information naturally. It combines vector embeddings for semantic search with LLM-powered relationship inference to create a contextually-aware knowledge network.
 
-> **⚠️ Development Status**: Active development. The test suite desperately needs a rewrite (yes, I know, don't judge me - it's on the list, I promise! 😅).
+> **⚠️ Development Status**: Active development. Recent major refactoring completed with improved architecture, error handling, and documentation. The test suite desperately needs a rewrite (yes, I know, don't judge me - it's on the list, I promise! 😅).
 
 > **🤝 Contributions Welcome!** I'm actively seeking contributors to make MnemoGraph awesome. Whether you're fixing bugs, adding features, or improving docs - your help is valued!
 
-> **🚀 Coming Soon: Brain-Like Retrieval System** - I'm implementing a revolutionary "RAG on Steroids" retrieval mode that mimics how human memory works. This will combine vector similarity with relationship-based traversal, temporal scoring, and multi-factor ranking to deliver unprecedented retrieval accuracy.
+> **🚀 Coming Soon: Document Ingestion & Brain-Like Retrieval System** - Document ingestion with automatic chunking and summarization is in planning. Next up: a revolutionary "RAG on Steroids" retrieval mode that mimics how human memory works.
 
 ---
 
@@ -18,7 +18,10 @@ MnemoGraph is a memory management system that leverages Large Language Models to
 - **🔍 Smart Context Filtering**: Multi-stage pipeline (1M+ memories → 20 relevant ones)
 - **🧬 Memory Evolution**: Tracks changes, versions, and history automatically
 - **♻️ Semantic Invalidation**: LLM decides what's still relevant
-- **🔄 Dual-Store Architecture**: Graph (Neo4j) + Vector (Qdrant) = best of both worlds
+- **🏗️ Unified Architecture**: MemoryStore facade provides consistent access patterns
+- **📊 Vector Store as Source of Truth**: All memory data stored in vector store, graph for relationships
+- **⚡ Atomic Access Tracking**: Automatic, consistent access pattern tracking
+- **🛡️ Robust Error Handling**: Comprehensive exception hierarchy and structured logging
 - **💡 Derived Insights**: Discovers patterns across memories
 - **⚡ REST API**: FastAPI with automatic OpenAPI docs
 
@@ -66,13 +69,14 @@ graph TB
         Stage3["Stage 3: LLM<br/>50 → 20<br/>200-500ms"]
     end
 
-    subgraph Sync["🔄 Sync Layer"]
+    subgraph Facade["🏗️ MemoryStore Facade"]
+        MemStore["MemoryStore<br/>• Unified CRUD<br/>• Access Tracking<br/>• Search Operations"]
         SyncMgr["Memory Sync Manager<br/>• Retry Logic<br/>• Validation<br/>• Repair<br/>• Batch Ops"]
     end
 
     subgraph Storage["💾 Storage Layer"]
-        Vector["Vector Store<br/>Qdrant<br/>• Embeddings<br/>• HNSW Search"]
-        Graph["Graph Store<br/>Neo4j<br/>• Nodes<br/>• Relationships"]
+        Vector["Vector Store<br/>Qdrant<br/>• Source of Truth<br/>• All Memory Data<br/>• Embeddings<br/>• HNSW Search"]
+        Graph["Graph Store<br/>Neo4j<br/>• Minimal Nodes<br/>• Relationships<br/>• Graph Queries"]
     end
 
     FastAPI --> MemEngine
@@ -84,17 +88,21 @@ graph TB
     Stage1 --> Stage2
     Stage2 --> Stage3
 
-    MemEngine --> SyncMgr
+    MemEngine --> MemStore
+    LLMRel --> MemStore
+    Evolution --> MemStore
+    Invalid --> MemStore
+
+    MemStore --> SyncMgr
+    MemStore --> Vector
+    MemStore --> Graph
     SyncMgr --> Vector
     SyncMgr --> Graph
-
-    Evolution --> SyncMgr
-    Invalid --> SyncMgr
-    LLMRel --> SyncMgr
 
     style FastAPI fill:#e1f5ff
     style MemEngine fill:#fff4e1
     style LLMRel fill:#f0e1ff
+    style MemStore fill:#ffe1ff
     style SyncMgr fill:#e1ffe1
     style Vector fill:#ffe1e1
     style Graph fill:#ffe1e1
@@ -102,12 +110,34 @@ graph TB
 
 ### Key Components
 
+**🏗️ MemoryStore Facade**
+
+- Unified access layer for all memory operations
+- Atomic access tracking (automatic access_count and last_accessed updates)
+- Consistent CRUD operations across stores
+- Search operations (vector + graph)
+- Relationship management
+- All services use this facade (no direct store access)
+
+**💾 Storage Architecture**
+
+- **Vector Store**: Source of truth for ALL memory data
+  - Complete memory objects with all fields
+  - All metadata and timestamps
+  - Embeddings for semantic search
+  - Access tracking (access_count, last_accessed)
+- **Graph Store**: Minimal nodes for relationships
+  - Only stores: id, content_preview, type, status, version info
+  - Full relationship data (edges with metadata)
+  - Graph traversal and queries
+
 **🔄 Memory Sync Manager**
 
 - Automatic retry logic with exponential backoff
 - Consistency validation between stores
 - Self-healing repair mechanism
 - Efficient batch operations
+- Syncs minimal node data from vector store to graph store
 
 **🤖 LLM Relationship Engine**
 
@@ -115,6 +145,7 @@ graph TB
 - Parallel execution
 - Event-driven invalidation
 - Derived memory creation
+- Uses MemoryStore facade for all operations
 
 **🔍 Multi-Stage Context Filter**
 
@@ -128,6 +159,7 @@ graph TB
 - Complete history tracking
 - Supersession management
 - Time-travel queries
+- Uses MemoryStore facade for unified access
 
 **♻️ Invalidation Manager**
 
@@ -135,6 +167,47 @@ graph TB
 - Background worker
 - Event-driven checks
 - LLM-based relevance analysis
+- Uses MemoryStore facade for unified access
+
+**🛡️ Error Handling**
+
+- Comprehensive exception hierarchy
+- Structured logging with context
+- Early returns and guard clauses
+- Proper error propagation
+- Input validation throughout
+
+---
+
+## ✨ Recent Improvements (Refactoring)
+
+### Architecture Enhancements
+
+- **MemoryStore Facade**: Unified access layer eliminates direct store calls from services
+- **Vector Store as Source of Truth**: All memory data stored in vector store, graph store for relationships only
+- **Atomic Access Tracking**: Automatic, consistent tracking of access_count and last_accessed
+- **Clean Layering**: Core components don't depend on services, proper architectural separation
+
+### Error Handling & Reliability
+
+- **Exception Hierarchy**: Comprehensive custom exceptions (ValidationError, StoreError, LLMError, etc.)
+- **Structured Logging**: Context-rich logging with operation tracking
+- **Input Validation**: Early validation with clear error messages
+- **Error Propagation**: Proper exception chaining and error context
+
+### Code Quality
+
+- **Comprehensive Docstrings**: All functions, classes, and methods documented with Args/Returns
+- **Type Hints**: Complete type annotations throughout
+- **Balanced Comments**: Helpful comments without overcommenting
+- **Consistent Patterns**: Uniform error handling, logging, and access patterns
+
+### Performance & Scalability
+
+- **Efficient Metadata Updates**: Vector store payload updates (no vector re-indexing)
+- **Optimized LLM Models**: Reduced token usage for structured outputs
+- **Batch Operations**: Support for batch memory operations
+- **Access Tracking**: Atomic updates with minimal overhead
 
 ---
 
@@ -272,7 +345,9 @@ Access at:
 - **Graph Store**: Neo4j
 - **Embeddings**: Ollama (nomic-embed-text) / OpenAI (text-embedding-3-small)
 - **API**: FastAPI
-- **Testing**: pytest _(needs serious refactoring, we're aware!)_
+- **Testing**: pytest (comprehensive test suite with unit and integration tests)
+- **Error Handling**: Custom exception hierarchy with structured logging
+- **Architecture**: Unified MemoryStore facade with clean separation of concerns
 
 ---
 
@@ -293,6 +368,11 @@ Built on cognitive science research and modern LLM infrastructure. Thanks to the
 3. **Semantic invalidation**: LLMs know relevance better than decay formulas
 4. **Relationships need reasoning**: Know _why_, not just _what_
 5. **Memory evolves**: Track changes, preserve history
+6. **Unified access patterns**: MemoryStore facade ensures consistency and abstraction
+7. **Vector store as source of truth**: All memory data in vector store, graph for relationships only
+8. **Atomic operations**: Access tracking and updates are atomic and consistent
+9. **Robust error handling**: Comprehensive exceptions and structured logging
+10. **Clean architecture**: Core components don't depend on services, proper layering
 
 ---
 
