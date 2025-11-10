@@ -23,32 +23,27 @@ logger = get_logger(__name__)
 
 
 class RelevanceScore(BaseModel):
-    """Relevance score from LLM pre-filter."""
+    """Relevance score from LLM pre-filter (structured output)."""
 
     model_config = {"extra": "ignore"}
 
-    id: str = Field(..., description="REQUIRED: The ID of the memory being scored")
+    id: str = Field(..., description="Memory ID being scored")
     relevance: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="REQUIRED: Relevance score between 0.0 and 1.0. Use 1.0 for highly relevant, 0.7-0.9 for relevant, 0.4-0.7 for somewhat relevant, <0.4 for not relevant",
+        description="Relevance (0-1): 1.0=high, 0.7-0.9=relevant, 0.4-0.7=some, <0.4=not",
     )
-    reason: str = Field(
-        ...,
-        description="REQUIRED: Brief explanation of why this relevance score was assigned. Mention specific aspects that make it relevant or not.",
-    )
+    reason: str = Field(..., description="Brief why this score with specific aspects")
 
 
 class EntityList(BaseModel):
-    """List of entities extracted from text."""
+    """List of entities extracted from text (structured output)."""
 
     model_config = {"extra": "ignore"}
 
     entities: list[str] = Field(
-        ...,
-        description="REQUIRED: List of key entities (people, places, organizations, concepts) extracted from the text. Maximum 5 entities.",
-        max_length=5,
+        ..., description="Key entities (people, places, orgs, concepts), max 5", max_length=5
     )
 
 

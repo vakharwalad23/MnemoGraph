@@ -23,27 +23,18 @@ from src.models.version import MemoryEvolution, VersionChain, VersionChange
 
 
 class EvolutionAnalysis(BaseModel):
-    """LLM analysis of how to evolve a memory."""
+    """LLM analysis of how to evolve a memory (structured output)."""
 
-    model_config = {"extra": "ignore"}  # Ignore extra fields from LLM
+    model_config = {"extra": "ignore"}
 
-    action: str = Field(
-        ...,
-        description="REQUIRED: The action to take. Must be exactly one of: 'update', 'augment', 'replace', or 'preserve'",
-    )
-    reasoning: str = Field(
-        ...,
-        description="REQUIRED: Detailed explanation of why this action is appropriate. Include specific details about what changed and why.",
-    )
-    change_description: str = Field(
-        ...,
-        description="REQUIRED: Brief description of what changed (1-2 sentences). Example: 'Updated location from Paris to London' or 'Added new skill: Python programming'",
-    )
+    action: str = Field(..., description="Action: update, augment, replace, or preserve")
+    reasoning: str = Field(..., description="Why this action with specific details")
+    change_description: str = Field(..., description="Brief what changed (1-2 sentences)")
     confidence: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="REQUIRED: Confidence score between 0.0 and 1.0. Use 1.0 for certain changes, 0.5-0.8 for probable changes, <0.5 for uncertain changes.",
+        description="Confidence (0-1): 1.0=certain, 0.5-0.8=probable, <0.5=uncertain",
     )
 
 

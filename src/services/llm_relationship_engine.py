@@ -121,13 +121,9 @@ class LLMRelationshipEngine:
         extraction = results[0] if not isinstance(results[0], Exception) else None
 
         if not extraction:
-            logger.error("LLM extraction failed")
-            return RelationshipBundle(
-                memory_id=memory.id,
-                relationships=[],
-                derived_insights=[],
-                extraction_time_ms=(time.time() - start_time) * 1000,
-            )
+            extraction_time = (time.time() - start_time) * 1000
+            logger.error(f"LLM extraction failed (took {extraction_time:.0f}ms)")
+            return RelationshipBundle(memory_id=memory.id, relationships=[], derived_insights=[])
 
         # Step 4: Create edges in parallel
         logger.debug(f"Creating {len(extraction.relationships)} relationship edges")
@@ -161,8 +157,6 @@ class LLMRelationshipEngine:
                 logger.info(f"Superseded {len(superseded)} existing memories")
 
         extraction_time = (time.time() - start_time) * 1000
-        extraction.extraction_time_ms = extraction_time
-
         logger.info(f"Extraction complete in {extraction_time:.0f}ms")
 
         return extraction
