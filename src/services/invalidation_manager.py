@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
+from src.core.memory_store.memory_store import MemoryStore
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, MemoryStatus
 from src.models.version import InvalidationResult, InvalidationStatus
@@ -54,8 +55,9 @@ class InvalidationManager:
     def __init__(
         self,
         llm: LLMProvider,
-        graph_store: GraphStore,
-        vector_store: VectorStore,
+        memory_store: MemoryStore,
+        graph_store: GraphStore | None = None,
+        vector_store: VectorStore | None = None,
         sync_manager: MemorySyncManager | None = None,
     ):
         """
@@ -63,11 +65,15 @@ class InvalidationManager:
 
         Args:
             llm: LLM provider for semantic evaluation
-            graph_store: Graph database
-            vector_store: Vector database
+            memory_store: MemoryStore facade for unified memory operations
+            graph_store: Optional graph database (for backwards compatibility)
+            vector_store: Optional vector database (for backwards compatibility)
             sync_manager: Optional sync manager for atomic updates
         """
         self.llm = llm
+        self.memory_store = memory_store
+
+        # Keep legacy references for now (will be removed later)
         self.graph_store = graph_store
         self.vector_store = vector_store
         self.sync_manager = sync_manager
@@ -83,6 +89,9 @@ class InvalidationManager:
 
         Only validates periodically, not every access.
 
+        Note: Access tracking is now handled automatically by MemoryStore.get_memory(),
+        so this method focuses only on validation logic.
+
         Args:
             memory: Memory to validate
             current_context: Optional context for validation
@@ -90,18 +99,15 @@ class InvalidationManager:
         Returns:
             Updated memory (may have changed status)
         """
-        # Mark as accessed
-        memory.mark_accessed()
-
         # Check if already invalidated
         if memory.status != MemoryStatus.ACTIVE:
-            await self.graph_store.update_node(memory)
+            # Update via MemoryStore
+            await self.memory_store.update_memory(memory)
             return memory
 
         # Decide if validation is needed
         if not self._should_validate(memory):
-            # Still update access tracking even if not validating
-            await self.graph_store.update_node(memory)
+            # No validation needed, just return
             return memory
 
         # Perform validation
@@ -110,11 +116,10 @@ class InvalidationManager:
         if result.status != InvalidationStatus.ACTIVE:
             # Mark as invalidated
             memory = await self._mark_invalidated(memory, result)
-
         else:
             # Update last_validated timestamp
             memory.metadata["last_validated"] = datetime.now().isoformat()
-            await self.graph_store.update_node(memory)
+            await self.memory_store.update_memory(memory)
 
         return memory
 
@@ -261,7 +266,7 @@ class InvalidationManager:
             else:
                 # Update last_validated
                 memory.metadata["last_validated"] = datetime.now().isoformat()
-                await self.graph_store.update_node(memory)
+                await self.memory_store.update_memory(memory)
 
         except Exception as e:
             logger.error(f"Error validating {memory.id}: {e}")
@@ -340,12 +345,8 @@ Respond with JSON:
                     candidate.superseded_by = new_memory.id
                     candidate.invalidation_reason = result.reasoning
 
-                    # Update graph store first
-                    await self.graph_store.update_node(candidate)
-
-                    # Sync supersession to vector store if sync manager available
-                    if self.sync_manager:
-                        await self.sync_manager.sync_memory_supersession(candidate)
+                    # Update via MemoryStore (handles both stores)
+                    await self.memory_store.update_memory(candidate)
 
                     superseded.append(candidate)
 
@@ -424,12 +425,8 @@ Respond with JSON:
         memory.metadata["invalidated_at"] = datetime.now().isoformat()
         memory.updated_at = datetime.now()
 
-        # Update graph store first
-        await self.graph_store.update_node(memory)
-
-        # Sync invalidation state to vector store if sync manager available
-        if self.sync_manager:
-            await self.sync_manager.sync_memory_invalidation(memory)
+        # Update via MemoryStore (handles both stores)
+        await self.memory_store.update_memory(memory)
 
         return memory
 
@@ -444,14 +441,21 @@ Respond with JSON:
             Context string
         """
         try:
-            neighbors = await self.graph_store.get_neighbors(memory.id, limit=5)
+            # Get neighbors via MemoryStore
+            neighbors = await self.memory_store.get_neighbors(
+                memory_id=memory.id,
+                direction="both",
+                depth=1,
+                limit=5,
+                track_access=False,  # Don't track access for context gathering
+            )
 
             if not neighbors:
                 return "No related memories found"
 
             context_lines = [f"Related to {len(neighbors)} other memories:"]
-            for n in neighbors[:3]:
-                content_preview = n["node"].content[:50]
+            for neighbor_memory, _ in neighbors[:3]:
+                content_preview = neighbor_memory.content[:50]
                 context_lines.append(f"- {content_preview}...")
 
             return "\n".join(context_lines)

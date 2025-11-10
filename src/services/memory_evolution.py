@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from src.core.embeddings.base import Embedder
 from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
+from src.core.memory_store.memory_store import MemoryStore
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, MemoryStatus
 from src.models.version import MemoryEvolution, VersionChain, VersionChange
@@ -60,8 +61,9 @@ class MemoryEvolutionService:
     def __init__(
         self,
         llm: LLMProvider,
-        graph_store: GraphStore,
+        memory_store: MemoryStore,
         embedder: Embedder,
+        graph_store: GraphStore | None = None,
         vector_store: VectorStore | None = None,
         sync_manager: MemorySyncManager | None = None,
     ):
@@ -70,14 +72,18 @@ class MemoryEvolutionService:
 
         Args:
             llm: LLM provider for evolution analysis
-            graph_store: Graph database for storing memory nodes
+            memory_store: MemoryStore facade for unified memory operations
             embedder: Embedder for generating embeddings
+            graph_store: Optional graph database (for backwards compatibility)
             vector_store: Optional vector store for semantic search in time travel queries
             sync_manager: Optional sync manager for atomic updates
         """
         self.llm = llm
-        self.graph_store = graph_store
+        self.memory_store = memory_store
         self.embedder = embedder
+
+        # Keep legacy references for now (will be removed later)
+        self.graph_store = graph_store
         self.vector_store = vector_store
         self.sync_manager = sync_manager
 
@@ -112,15 +118,9 @@ class MemoryEvolutionService:
             current.invalidation_reason = f"Superseded: {analysis.change_description}"
             current.updated_at = datetime.now()
 
-            # Save both versions - graph store first
-            await self.graph_store.update_node(current)
-            await self.graph_store.add_node(new_version)
-
-            # Sync supersession to vector store if sync manager available
-            if self.sync_manager:
-                await self.sync_manager.sync_memory_supersession(current)
-                # Sync new version as well
-                await self.sync_manager.sync_memory_full(new_version)
+            # Update via MemoryStore (handles both stores)
+            await self.memory_store.update_memory(current)
+            await self.memory_store.create_memory(new_version)
 
             return MemoryEvolution(
                 current_version=current.id,
@@ -145,11 +145,8 @@ class MemoryEvolutionService:
             current.metadata["last_augment"] = datetime.now().isoformat()
             current.updated_at = datetime.now()
 
-            await self.graph_store.update_node(current)
-
-            # Sync changes to vector store
-            if self.sync_manager:
-                await self.sync_manager.sync_memory_full(current)
+            # Update via MemoryStore (handles both stores)
+            await self.memory_store.update_memory(current)
 
             return MemoryEvolution(
                 current_version=current.id,
@@ -185,12 +182,8 @@ class MemoryEvolutionService:
                 updated_at=datetime.now(),
             )
 
-            # Add new memory to graph store
-            await self.graph_store.add_node(new_memory)
-
-            # Sync to vector store
-            if self.sync_manager:
-                await self.sync_manager.sync_memory_full(new_memory)
+            # Create via MemoryStore (handles both stores)
+            await self.memory_store.create_memory(new_memory)
 
             return MemoryEvolution(
                 current_version=current.id,
@@ -473,14 +466,8 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
         current.superseded_by = new_version.id
         current.invalidation_reason = f"Rolled back to version {target.version}"
 
-        # Save both - graph store first
-        await self.graph_store.update_node(current)
-        await self.graph_store.add_node(new_version)
-
-        # Sync changes to vector store if sync manager available
-        if self.sync_manager:
-            await self.sync_manager.sync_memory_supersession(current)
-            # Sync new version as well
-            await self.sync_manager.sync_memory_full(new_version)
+        # Update via MemoryStore (handles both stores)
+        await self.memory_store.update_memory(current)
+        await self.memory_store.create_memory(new_version)
 
         return new_version

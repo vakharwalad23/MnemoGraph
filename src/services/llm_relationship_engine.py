@@ -10,6 +10,7 @@ from src.config import Config
 from src.core.embeddings.base import Embedder
 from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
+from src.core.memory_store.memory_store import MemoryStore
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, NodeType
 from src.models.relationships import (
@@ -42,6 +43,7 @@ class LLMRelationshipEngine:
         self,
         llm_provider: LLMProvider,
         embedder: Embedder,
+        memory_store: MemoryStore,
         vector_store: VectorStore,
         graph_store: GraphStore,
         config: Config,
@@ -53,21 +55,26 @@ class LLMRelationshipEngine:
         Args:
             llm_provider: LLM for relationship extraction
             embedder: Embedder for generating embeddings
+            memory_store: MemoryStore facade for unified memory operations
             vector_store: Vector database
             graph_store: Graph database
             config: Configuration object
+            sync_manager: Sync manager for consistency
         """
         self.llm = llm_provider
         self.embedder = embedder
+        self.memory_store = memory_store
+        self.config = config
+
+        # Keep legacy references for now
         self.vector_store = vector_store
         self.graph_store = graph_store
-        self.config = config
 
         # Initialize sub-systems
         self.filter = MultiStageFilter(vector_store, graph_store, llm_provider, config)
 
         self.invalidation = InvalidationManager(
-            llm_provider, graph_store, vector_store, sync_manager
+            llm_provider, memory_store, graph_store, vector_store, sync_manager
         )
 
     async def process_new_memory(self, memory: Memory) -> RelationshipBundle:
@@ -97,20 +104,18 @@ class LLMRelationshipEngine:
 
         # Step 3: Parallel operations
         # - LLM extraction
-        # - Vector store upsert
-        # - Graph node creation
+        # - MemoryStore creation (handles vector + graph)
         logger.debug("Extracting relationships with LLM")
 
         extraction_task = self.llm.complete(
             prompt, response_format=RelationshipBundle, max_tokens=2000, temperature=0.0
         )
 
-        upsert_task = self.vector_store.upsert_memory(memory)
-
-        node_task = self.graph_store.add_node(memory)
+        # Create memory via MemoryStore (handles both stores)
+        memory_creation_task = self.memory_store.create_memory(memory)
 
         results = await asyncio.gather(
-            extraction_task, upsert_task, node_task, return_exceptions=True
+            extraction_task, memory_creation_task, return_exceptions=True
         )
 
         extraction = results[0] if not isinstance(results[0], Exception) else None
@@ -394,19 +399,19 @@ Begin extraction:
                     confidence=insight.confidence,
                 )
 
-                # Add to stores
-                await self.graph_store.add_node(derived)
-                await self.vector_store.upsert_memory(derived)
+                # Create via MemoryStore (handles both stores)
+                await self.memory_store.create_memory(derived)
 
                 # Create DERIVED_FROM edges
                 for source_id in insight.source_ids:
-                    await self.graph_store.add_edge(
-                        {
-                            "source": derived.id,
-                            "target": source_id,
-                            "type": "DERIVED_FROM",
-                            "metadata": {"confidence": insight.confidence},
-                        }
+                    await self.memory_store.add_relationship(
+                        Edge(
+                            source=derived.id,
+                            target=source_id,
+                            type="DERIVED_FROM",
+                            confidence=insight.confidence,
+                            metadata={"confidence": insight.confidence},
+                        )
                     )
 
                 logger.debug(f"Created derived memory: {derived_id[:8]}")

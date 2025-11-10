@@ -96,14 +96,16 @@ class MemoryEngine:
         # Initialize services with dependencies
         self.evolution = MemoryEvolutionService(
             llm=llm,
-            graph_store=graph_store,
+            memory_store=self.memory_store,
             embedder=embedder,
+            graph_store=graph_store,
             vector_store=vector_store,
             sync_manager=self.sync_manager,
         )
 
         self.invalidation = InvalidationManager(
             llm=llm,
+            memory_store=self.memory_store,
             graph_store=graph_store,
             vector_store=vector_store,
             sync_manager=self.sync_manager,
@@ -112,6 +114,7 @@ class MemoryEngine:
         self.relationship_engine = LLMRelationshipEngine(
             llm_provider=llm,
             embedder=embedder,
+            memory_store=self.memory_store,
             vector_store=vector_store,
             graph_store=graph_store,
             config=config,
