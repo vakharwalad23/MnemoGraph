@@ -16,6 +16,7 @@ from src.config import Config
 from src.core.embeddings.base import Embedder
 from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
+from src.core.memory_store import MemorySyncManager
 from src.core.memory_store.memory_store import MemoryStore
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, NodeType
@@ -24,7 +25,6 @@ from src.models.version import InvalidationResult, MemoryEvolution, VersionChain
 from src.services.invalidation_manager import InvalidationManager
 from src.services.llm_relationship_engine import LLMRelationshipEngine
 from src.services.memory_evolution import MemoryEvolutionService
-from src.services.memory_sync import MemorySyncManager
 from src.utils.exceptions import (
     EmbeddingError,
     GraphStoreError,
@@ -89,7 +89,8 @@ class MemoryEngine:
             sync_manager=self.sync_manager,
         )
 
-        # Keep direct store references for services that still need them
+        # Keep direct store references for infrastructure operations (initialize, close, statistics)
+        # All memory operations should use self.memory_store instead
         self.graph_store = graph_store
         self.vector_store = vector_store
 
@@ -300,8 +301,10 @@ class MemoryEngine:
         )
 
         try:
-            # Get current memory
-            current = await self.graph_store.get_node(memory_id)
+            # Get current memory from MemoryStore (source of truth)
+            current = await self.memory_store.get_memory(
+                memory_id=memory_id, track_access=False, include_relationships=False
+            )
             if not current:
                 raise NotFoundError(f"Memory not found: {memory_id}")
 
@@ -310,7 +313,9 @@ class MemoryEngine:
 
             # If new version created, retrieve it
             if evolution.new_version:
-                new_memory = await self.graph_store.get_node(evolution.new_version)
+                new_memory = await self.memory_store.get_memory(
+                    memory_id=evolution.new_version, track_access=False, include_relationships=False
+                )
                 logger.info(
                     "Memory updated with new version",
                     extra={"memory_id": memory_id, "new_version": evolution.new_version},
@@ -318,7 +323,9 @@ class MemoryEngine:
                 return new_memory, evolution
 
             # For augment or preserve, return the current memory
-            updated_memory = await self.graph_store.get_node(memory_id)
+            updated_memory = await self.memory_store.get_memory(
+                memory_id=memory_id, track_access=False, include_relationships=False
+            )
             logger.info(
                 f"Memory {evolution.action}",
                 extra={"memory_id": memory_id, "action": evolution.action},
@@ -618,10 +625,19 @@ class MemoryEngine:
 
         Returns:
             InvalidationResult
+
+        Raises:
+            ValidationError: If memory_id is invalid
+            NotFoundError: If memory not found
         """
-        memory = await self.graph_store.get_node(memory_id)
+        if not memory_id:
+            raise ValidationError("memory_id is required")
+
+        memory = await self.memory_store.get_memory(
+            memory_id=memory_id, track_access=False, include_relationships=False
+        )
         if not memory:
-            raise ValueError(f"Memory not found: {memory_id}")
+            raise NotFoundError(f"Memory not found: {memory_id}")
 
         return await self.invalidation.check_invalidation(memory)
 
@@ -632,10 +648,21 @@ class MemoryEngine:
         Args:
             memory_id: Memory to invalidate
             reason: Invalidation reason
+
+        Raises:
+            ValidationError: If inputs are invalid
+            NotFoundError: If memory not found
         """
-        memory = await self.graph_store.get_node(memory_id)
+        if not memory_id:
+            raise ValidationError("memory_id is required")
+        if not reason or not reason.strip():
+            raise ValidationError("reason cannot be empty")
+
+        memory = await self.memory_store.get_memory(
+            memory_id=memory_id, track_access=False, include_relationships=False
+        )
         if not memory:
-            raise ValueError(f"Memory not found: {memory_id}")
+            raise NotFoundError(f"Memory not found: {memory_id}")
 
         from src.models.version import InvalidationResult, InvalidationStatus
 

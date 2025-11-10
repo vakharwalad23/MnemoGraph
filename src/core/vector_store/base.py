@@ -1,5 +1,5 @@
 """
-Base interface for vector storage - redesigned for Phase 1-3.
+Base interface for vector storage
 
 Clean interface that works with new Memory model and embedding system.
 """

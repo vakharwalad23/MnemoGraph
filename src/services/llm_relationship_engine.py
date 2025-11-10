@@ -10,6 +10,7 @@ from src.config import Config
 from src.core.embeddings.base import Embedder
 from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
+from src.core.memory_store import MemorySyncManager
 from src.core.memory_store.memory_store import MemoryStore
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, NodeType
@@ -22,7 +23,6 @@ from src.models.relationships import (
 )
 from src.services.context_filter import MultiStageFilter
 from src.services.invalidation_manager import InvalidationManager
-from src.services.memory_sync import MemorySyncManager
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

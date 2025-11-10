@@ -1,5 +1,5 @@
 """
-Base interface for graph storage - redesigned for Phase 2 & 3.
+Base interface for graph storage
 
 Clean interface that works with new Memory model and relationship system.
 """

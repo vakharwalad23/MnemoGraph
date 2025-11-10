@@ -16,10 +16,10 @@ from datetime import datetime
 from typing import Any
 
 from src.core.graph_store.base import GraphStore
+from src.core.memory_store.sync_manager import MemorySyncManager
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory
 from src.models.relationships import Edge
-from src.services.memory_sync import MemorySyncManager
 from src.utils.exceptions import (
     GraphStoreError,
     MemoryError,

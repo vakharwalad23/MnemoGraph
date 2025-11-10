@@ -1,5 +1,5 @@
 """
-Qdrant vector store implementation - redesigned for Phase 1-3.
+Qdrant vector store implementation
 
 Clean implementation that works with new Memory model and optimized for performance.
 """

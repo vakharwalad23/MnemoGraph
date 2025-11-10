@@ -15,11 +15,11 @@ from pydantic import BaseModel, Field
 from src.core.embeddings.base import Embedder
 from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
+from src.core.memory_store import MemorySyncManager
 from src.core.memory_store.memory_store import MemoryStore
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, MemoryStatus
 from src.models.version import MemoryEvolution, VersionChain, VersionChange
-from src.services.memory_sync import MemorySyncManager
 
 
 class EvolutionAnalysis(BaseModel):
