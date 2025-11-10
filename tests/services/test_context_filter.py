@@ -15,24 +15,21 @@ from src.services.context_filter import MultiStageFilter
 class TestMultiStageFilterUnit:
     """Unit tests for MultiStageFilter."""
 
-    async def test_initialization(self, mock_vector_store, neo4j_graph_store, mock_llm, config):
+    async def test_initialization(self, memory_store, mock_llm, config):
         """Test filter initialization."""
         filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             llm_provider=mock_llm,
             config=config,
         )
 
-        assert filter_service.vector_store == mock_vector_store
-        assert filter_service.graph_store == neo4j_graph_store
+        assert filter_service.memory_store == memory_store
         assert filter_service.llm == mock_llm
         assert filter_service.config == config
 
     async def test_stage1_vector_search(
         self,
-        mock_vector_store,
-        neo4j_graph_store,
+        memory_store,
         mock_llm,
         config,
         sample_memory,
@@ -41,15 +38,14 @@ class TestMultiStageFilterUnit:
         """Test stage 1 vector search."""
         # Setup
         filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             llm_provider=mock_llm,
             config=config,
         )
 
         # Add some memories to vector store
         for mem in sample_memories:
-            await mock_vector_store.upsert_memory(mem)
+            await memory_store.vector_store.upsert_memory(mem)
 
         # Test vector search
         results = await filter_service._stage1_vector_search(sample_memory)
@@ -59,8 +55,7 @@ class TestMultiStageFilterUnit:
 
     async def test_temporal_filter(
         self,
-        mock_vector_store,
-        neo4j_graph_store,
+        memory_store,
         mock_llm,
         config,
         sample_memory,
@@ -68,15 +63,14 @@ class TestMultiStageFilterUnit:
     ):
         """Test temporal filtering."""
         filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             llm_provider=mock_llm,
             config=config,
         )
 
         # Add memories to graph store
         for mem in sample_memories:
-            await neo4j_graph_store.add_node(mem)
+            await memory_store.graph_store.add_node(mem)
 
         # Test temporal filter
         results = await filter_service._temporal_filter(sample_memory)
@@ -86,13 +80,10 @@ class TestMultiStageFilterUnit:
         for mem in results:
             assert mem.status == MemoryStatus.ACTIVE
 
-    async def test_graph_filter_no_neighbors(
-        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memory
-    ):
+    async def test_graph_filter_no_neighbors(self, memory_store, mock_llm, config, sample_memory):
         """Test graph filter when memory has no neighbors."""
         filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -103,13 +94,10 @@ class TestMultiStageFilterUnit:
         assert isinstance(results, list)
         assert len(results) == 0  # No neighbors for new memory
 
-    async def test_entity_filter(
-        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memory
-    ):
+    async def test_entity_filter(self, memory_store, mock_llm, config, sample_memory):
         """Test entity extraction and filtering."""
         filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -122,12 +110,11 @@ class TestMultiStageFilterUnit:
         # (No call_count check since we're using real Ollama)
 
     async def test_conversation_filter_no_conversation(
-        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memory
+        self, memory_store, mock_llm, config, sample_memory
     ):
         """Test conversation filter when no conversation_id."""
         filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -138,13 +125,10 @@ class TestMultiStageFilterUnit:
         assert isinstance(results, list)
         assert len(results) == 0
 
-    async def test_conversation_filter_with_conversation(
-        self, mock_vector_store, neo4j_graph_store, mock_llm, config
-    ):
+    async def test_conversation_filter_with_conversation(self, memory_store, mock_llm, config):
         """Test conversation filter with conversation_id."""
         filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -162,7 +146,7 @@ class TestMultiStageFilterUnit:
         ]
 
         for mem in conv_memories:
-            await neo4j_graph_store.add_node(mem)
+            await memory_store.graph_store.add_node(mem)
 
         # Test with conversation memory
         test_memory = Memory(
@@ -179,13 +163,10 @@ class TestMultiStageFilterUnit:
         # Should find other memories in conversation
         assert len(results) <= 10
 
-    async def test_deduplicate(
-        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memories
-    ):
+    async def test_deduplicate(self, memory_store, mock_llm, config, sample_memories):
         """Test deduplication of memories."""
         filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -201,13 +182,10 @@ class TestMultiStageFilterUnit:
         ids = [m.id for m in unique]
         assert len(ids) == len(set(ids))
 
-    async def test_combine_and_deduplicate(
-        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memories
-    ):
+    async def test_combine_and_deduplicate(self, memory_store, mock_llm, config, sample_memories):
         """Test combining and deduplicating results."""
         filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             llm_provider=mock_llm,
             config=config,
         )
@@ -236,20 +214,19 @@ class TestMultiStageFilterNeo4j:
     """Integration tests with Neo4j."""
 
     async def test_gather_context_neo4j(
-        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memory, sample_memories
+        self, memory_store, mock_llm, config, sample_memory, sample_memories
     ):
         """Test full context gathering with Neo4j."""
         filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             llm_provider=mock_llm,
             config=config,
         )
 
         # Setup data
         for mem in sample_memories:
-            await mock_vector_store.upsert_memory(mem)
-            await neo4j_graph_store.add_node(mem)
+            await memory_store.vector_store.upsert_memory(mem)
+            await memory_store.graph_store.add_node(mem)
 
         # Gather context
         context = await filter_service.gather_context(sample_memory)
@@ -260,22 +237,21 @@ class TestMultiStageFilterNeo4j:
         assert isinstance(context.filtered_candidates, list)
 
     async def test_graph_filter_with_neighbors_neo4j(
-        self, mock_vector_store, neo4j_graph_store, mock_llm, config, sample_memories
+        self, memory_store, mock_llm, config, sample_memories
     ):
         """Test graph filter with neighbors in Neo4j."""
         filter_service = MultiStageFilter(
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             llm_provider=mock_llm,
             config=config,
         )
 
         # Add memories and create edges
         for mem in sample_memories:
-            await neo4j_graph_store.add_node(mem)
+            await memory_store.graph_store.add_node(mem)
 
         # Create some edges
-        await neo4j_graph_store.add_edge(
+        await memory_store.graph_store.add_edge(
             {
                 "source": sample_memories[0].id,
                 "target": sample_memories[1].id,

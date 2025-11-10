@@ -8,11 +8,8 @@ import time
 
 from src.config import Config
 from src.core.embeddings.base import Embedder
-from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
-from src.core.memory_store import MemorySyncManager
-from src.core.memory_store.memory_store import MemoryStore
-from src.core.vector_store.base import VectorStore
+from src.core.memory_store import MemoryStore
 from src.models.memory import Memory, NodeType
 from src.models.relationships import (
     ContextBundle,
@@ -44,10 +41,7 @@ class LLMRelationshipEngine:
         llm_provider: LLMProvider,
         embedder: Embedder,
         memory_store: MemoryStore,
-        vector_store: VectorStore,
-        graph_store: GraphStore,
         config: Config,
-        sync_manager: MemorySyncManager,
     ):
         """
         Initialize LLM relationship engine.
@@ -56,24 +50,16 @@ class LLMRelationshipEngine:
             llm_provider: LLM for relationship extraction
             embedder: Embedder for generating embeddings
             memory_store: MemoryStore facade for unified memory operations
-            vector_store: Vector database
-            graph_store: Graph database
             config: Configuration object
-            sync_manager: Sync manager for consistency
         """
         self.llm = llm_provider
         self.embedder = embedder
         self.memory_store = memory_store
         self.config = config
 
-        self.vector_store = vector_store
-        self.graph_store = graph_store
+        self.filter = MultiStageFilter(memory_store, llm_provider, config)
 
-        self.filter = MultiStageFilter(vector_store, graph_store, llm_provider, config)
-
-        self.invalidation = InvalidationManager(
-            llm_provider, memory_store, graph_store, vector_store, sync_manager
-        )
+        self.invalidation = InvalidationManager(llm_provider, memory_store)
 
     async def process_new_memory(self, memory: Memory) -> RelationshipBundle:
         """
@@ -127,7 +113,7 @@ class LLMRelationshipEngine:
         for rel in extraction.relationships:
             if rel.confidence >= min_confidence:
                 edge = self._create_edge_from_relationship(memory.id, rel)
-                edge_tasks.append(self.graph_store.add_edge(edge))
+                edge_tasks.append(self.memory_store.add_relationship(edge))
 
         if edge_tasks:
             await asyncio.gather(*edge_tasks, return_exceptions=True)

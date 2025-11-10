@@ -13,11 +13,8 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from src.core.embeddings.base import Embedder
-from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
-from src.core.memory_store import MemorySyncManager
-from src.core.memory_store.memory_store import MemoryStore
-from src.core.vector_store.base import VectorStore
+from src.core.memory_store import MemoryStore
 from src.models.memory import Memory, MemoryStatus
 from src.models.version import MemoryEvolution, VersionChain, VersionChange
 
@@ -54,9 +51,6 @@ class MemoryEvolutionService:
         llm: LLMProvider,
         memory_store: MemoryStore,
         embedder: Embedder,
-        graph_store: GraphStore | None = None,
-        vector_store: VectorStore | None = None,
-        sync_manager: MemorySyncManager | None = None,
     ):
         """
         Initialize memory evolution service.
@@ -65,18 +59,10 @@ class MemoryEvolutionService:
             llm: LLM provider for evolution analysis
             memory_store: MemoryStore facade for unified memory operations
             embedder: Embedder for generating embeddings
-            graph_store: Optional graph database (for backwards compatibility)
-            vector_store: Optional vector store for semantic search in time travel queries
-            sync_manager: Optional sync manager for atomic updates
         """
         self.llm = llm
         self.memory_store = memory_store
         self.embedder = embedder
-
-        # Keep legacy references for now (will be removed later)
-        self.graph_store = graph_store
-        self.vector_store = vector_store
-        self.sync_manager = sync_manager
 
     async def evolve_memory(self, current: Memory, new_info: str) -> MemoryEvolution:
         """
@@ -286,7 +272,9 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
 
         # Walk backwards through versions
         while current_id:
-            memory = await self.graph_store.get_node(current_id)
+            memory = await self.memory_store.get_memory(current_id, track_access=False)
+            if not memory:
+                break
             versions.append(
                 {
                     "id": memory.id,
@@ -339,17 +327,18 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             List of memories valid at that time, optionally ranked by semantic similarity
         """
         # Hybrid approach: Semantic search + temporal filtering
-        if use_semantic_search and self.vector_store and query_embedding:
+        if use_semantic_search and query_embedding:
             # Step 1: Get semantically similar memories from vector store
-            similar_results = await self.vector_store.search_similar(
-                vector=query_embedding,
+            similar_results = await self.memory_store.search_similar(
+                query_embedding=query_embedding,
                 limit=limit * 5,  # Get more candidates for temporal filtering
+                track_access=False,
             )
 
             # Step 2: Filter by temporal validity
             valid_memories = []
             for result in similar_results:
-                memory = result.memory
+                memory = result[0]
                 if memory.valid_from <= as_of and (
                     memory.valid_until is None or memory.valid_until > as_of
                 ):
@@ -364,7 +353,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             "created_before": as_of.isoformat(),
         }
 
-        candidates = await self.graph_store.query_memories(
+        candidates = await self.memory_store.graph_store.query_memories(
             filters=filters,
             order_by="created_at DESC",
             limit=limit * 3,
@@ -395,10 +384,14 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
         Returns:
             Current active version
         """
-        memory = await self.graph_store.get_node(memory_id)
+        memory = await self.memory_store.get_memory(memory_id, track_access=False)
+        if not memory:
+            return None
 
         while memory.superseded_by:
-            memory = await self.graph_store.get_node(memory.superseded_by)
+            memory = await self.memory_store.get_memory(memory.superseded_by, track_access=False)
+            if not memory:
+                break
 
         return memory
 
@@ -415,7 +408,9 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             New memory with rolled back content
         """
         # Get target version
-        target = await self.graph_store.get_node(target_version_id)
+        target = await self.memory_store.get_memory(target_version_id, track_access=False)
+        if not target:
+            raise ValueError(f"Target version not found: {target_version_id}")
 
         # Get current version
         current = await self.get_current_version(target_version_id)

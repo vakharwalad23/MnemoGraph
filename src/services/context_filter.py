@@ -12,9 +12,8 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 
 from src.config import Config
-from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
-from src.core.vector_store.base import VectorStore
+from src.core.memory_store import MemoryStore
 from src.models.memory import Memory
 from src.models.relationships import ContextBundle
 from src.utils.logger import get_logger
@@ -57,8 +56,7 @@ class MultiStageFilter:
 
     def __init__(
         self,
-        vector_store: VectorStore,
-        graph_store: GraphStore,
+        memory_store: MemoryStore,
         llm_provider: LLMProvider,
         config: Config,
     ):
@@ -66,13 +64,11 @@ class MultiStageFilter:
         Initialize multi-stage filter.
 
         Args:
-            vector_store: Vector database
-            graph_store: Graph database
+            memory_store: Unified memory store facade
             llm_provider: LLM for pre-filtering
             config: Configuration object
         """
-        self.vector_store = vector_store
-        self.graph_store = graph_store
+        self.memory_store = memory_store
         self.llm = llm_provider
         self.config = config
 
@@ -138,13 +134,14 @@ class MultiStageFilter:
             List of candidate memories
         """
         try:
-            results = await self.vector_store.search_similar(
-                vector=memory.embedding,
+            results = await self.memory_store.search_similar(
+                embedding=memory.embedding,
                 limit=100,
                 filters={
                     "status": ["active", "historical"],
                     "created_after": (datetime.now() - timedelta(days=90)).isoformat(),
                 },
+                track_access=False,
                 score_threshold=0.3,
             )
 
@@ -197,17 +194,18 @@ class MultiStageFilter:
         try:
             cutoff = datetime.now() - timedelta(days=window_days)
 
-            results = await self.vector_store.search_similar(
-                vector=memory.embedding,
+            results = await self.memory_store.search_similar(
+                embedding=memory.embedding,
                 limit=20,
                 filters={
                     "status": ["active"],
                     "created_after": cutoff.isoformat(),
                 },
+                track_access=False,
                 score_threshold=0.4,
             )
 
-            return [r.memory for r in results] if results else []
+            return results if results else []
 
         except Exception:
             return []
@@ -224,8 +222,8 @@ class MultiStageFilter:
             List of neighboring memories
         """
         try:
-            neighbors = await self.graph_store.get_neighbors(
-                memory.id,
+            neighbors = await self.memory_store.get_neighbors(
+                memory_id=memory.id,
                 depth=depth,
                 relationship_types=[
                     "SIMILAR_TO",
@@ -237,7 +235,7 @@ class MultiStageFilter:
                 limit=15,
             )
 
-            return [n["node"] for n in neighbors if "node" in n]
+            return [n[0] for n in neighbors] if neighbors else []
 
         except Exception:
             return []
@@ -272,7 +270,7 @@ Return a JSON object with a list of up to 5 key entities.
             candidates = []
             for entity in result.entities[:5]:
                 try:
-                    related = await self.vector_store.search_by_payload(
+                    related = await self.memory_store.vector_store.search_by_payload(
                         filter={"entities": {"$contains": entity}}, limit=5
                     )
                     candidates.extend([r.memory for r in related])
@@ -300,7 +298,7 @@ Return a JSON object with a list of up to 5 key entities.
         try:
             conversation_id = memory.metadata["conversation_id"]
 
-            results = await self.graph_store.query_memories(
+            results = await self.memory_store.graph_store.query_memories(
                 filters={"metadata.conversation_id": conversation_id},
                 order_by="created_at DESC",
                 limit=10,

@@ -17,39 +17,31 @@ from src.services.invalidation_manager import InvalidationManager
 class TestInvalidationManagerUnit:
     """Unit tests for InvalidationManager."""
 
-    async def test_initialization(self, mock_llm, neo4j_graph_store, mock_vector_store):
+    async def test_initialization(self, mock_llm, memory_store):
         """Test manager initialization."""
         manager = InvalidationManager(
             llm=mock_llm,
-            graph_store=neo4j_graph_store,
-            vector_store=mock_vector_store,
+            memory_store=memory_store,
         )
 
         assert manager.llm == mock_llm
-        assert manager.graph_store == neo4j_graph_store
-        assert manager.vector_store == mock_vector_store
+        assert manager.memory_store == memory_store
 
-    async def test_should_validate_never_validated(
-        self, mock_llm, neo4j_graph_store, mock_vector_store, sample_memory
-    ):
+    async def test_should_validate_never_validated(self, mock_llm, memory_store, sample_memory):
         """Test validation needed when never validated."""
         manager = InvalidationManager(
             llm=mock_llm,
-            graph_store=neo4j_graph_store,
-            vector_store=mock_vector_store,
+            memory_store=memory_store,
         )
 
         # Memory without last_validated
         assert manager._should_validate(sample_memory) is True
 
-    async def test_should_validate_recent_memory(
-        self, mock_llm, neo4j_graph_store, mock_vector_store
-    ):
+    async def test_should_validate_recent_memory(self, mock_llm, memory_store):
         """Test validation logic for recent memories."""
         manager = InvalidationManager(
             llm=mock_llm,
-            graph_store=neo4j_graph_store,
-            vector_store=mock_vector_store,
+            memory_store=memory_store,
         )
 
         # Recent memory (< 30 days old)
@@ -70,12 +62,11 @@ class TestInvalidationManagerUnit:
         recent_mem.metadata["last_validated"] = (datetime.now() - timedelta(days=100)).isoformat()
         assert manager._should_validate(recent_mem) is True
 
-    async def test_should_validate_old_memory(self, mock_llm, neo4j_graph_store, mock_vector_store):
+    async def test_should_validate_old_memory(self, mock_llm, memory_store):
         """Test validation logic for old memories."""
         manager = InvalidationManager(
             llm=mock_llm,
-            graph_store=neo4j_graph_store,
-            vector_store=mock_vector_store,
+            memory_store=memory_store,
         )
 
         # Old memory (> 180 days)
@@ -92,12 +83,11 @@ class TestInvalidationManagerUnit:
         # Should validate (validated 20 days ago, needs 14 days for old memories)
         assert manager._should_validate(old_mem) is True
 
-    async def test_calculate_similarity(self, mock_llm, neo4j_graph_store, mock_vector_store):
+    async def test_calculate_similarity(self, mock_llm, memory_store):
         """Test cosine similarity calculation."""
         manager = InvalidationManager(
             llm=mock_llm,
-            graph_store=neo4j_graph_store,
-            vector_store=mock_vector_store,
+            memory_store=memory_store,
         )
 
         # Identical vectors
@@ -115,14 +105,11 @@ class TestInvalidationManagerUnit:
         vec6 = [-1.0, 0.0, 0.0]
         assert manager._calculate_similarity(vec5, vec6) == pytest.approx(-1.0)
 
-    async def test_check_invalidation(
-        self, mock_llm, neo4j_graph_store, mock_vector_store, sample_memory
-    ):
+    async def test_check_invalidation(self, mock_llm, memory_store, sample_memory):
         """Test invalidation checking."""
         manager = InvalidationManager(
             llm=mock_llm,
-            graph_store=neo4j_graph_store,
-            vector_store=mock_vector_store,
+            memory_store=memory_store,
         )
 
         # Check invalidation
@@ -142,17 +129,14 @@ class TestInvalidationManagerUnit:
 class TestInvalidationManagerNeo4j:
     """Integration tests with Neo4j."""
 
-    async def test_validate_on_access_neo4j(
-        self, mock_llm, neo4j_graph_store, mock_vector_store, sample_memory
-    ):
+    async def test_validate_on_access_neo4j(self, mock_llm, memory_store, sample_memory):
         """Test validation with Neo4j store."""
         manager = InvalidationManager(
             llm=mock_llm,
-            graph_store=neo4j_graph_store,
-            vector_store=mock_vector_store,
+            memory_store=memory_store,
         )
 
-        await neo4j_graph_store.add_node(sample_memory)
+        await memory_store.graph_store.add_node(sample_memory)
 
         # Validate
         result = await manager.validate_on_access(sample_memory)
@@ -160,19 +144,16 @@ class TestInvalidationManagerNeo4j:
         assert result is not None
         assert result.id == sample_memory.id
 
-    async def test_check_supersession_neo4j(
-        self, mock_llm, neo4j_graph_store, mock_vector_store, sample_memories
-    ):
+    async def test_check_supersession_neo4j(self, mock_llm, memory_store, sample_memories):
         """Test supersession checking with Neo4j."""
         manager = InvalidationManager(
             llm=mock_llm,
-            graph_store=neo4j_graph_store,
-            vector_store=mock_vector_store,
+            memory_store=memory_store,
         )
 
         # Add memories
         for mem in sample_memories:
-            await neo4j_graph_store.add_node(mem)
+            await memory_store.graph_store.add_node(mem)
 
         new_mem = Memory(
             id="new_mem",
@@ -193,12 +174,11 @@ class TestInvalidationManagerNeo4j:
 class TestInvalidationManagerBackgroundWorker:
     """Tests for background worker functionality."""
 
-    async def test_start_stop_worker(self, mock_llm, neo4j_graph_store, mock_vector_store):
+    async def test_start_stop_worker(self, mock_llm, memory_store):
         """Test starting and stopping background worker."""
         manager = InvalidationManager(
             llm=mock_llm,
-            graph_store=neo4j_graph_store,
-            vector_store=mock_vector_store,
+            memory_store=memory_store,
         )
 
         # Start worker

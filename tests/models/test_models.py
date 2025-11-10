@@ -12,7 +12,6 @@ from src.models.relationships import (
     ContextBundle,
     DerivedInsight,
     Edge,
-    FilterStageResult,
     Relationship,
     RelationshipBundle,
     RelationshipType,
@@ -196,7 +195,6 @@ class TestRelationshipBundle:
 
         assert bundle.memory_id == "mem_new"
         assert len(bundle.relationships) == 1
-        assert bundle.extraction_time_ms == 0.0
 
     def test_bundle_with_derived_insights(self):
         """Test bundle with derived insights."""
@@ -227,7 +225,6 @@ class TestRelationshipBundle:
         assert bundle.memory_id == "mem_new"
         assert len(bundle.relationships) == 0
         assert len(bundle.derived_insights) == 0
-        assert bundle.extraction_time_ms == 0.0
 
 
 class TestDerivedInsight:
@@ -406,7 +403,6 @@ class TestInvalidationResult:
         assert result.status == InvalidationStatus.ACTIVE
         assert result.reasoning == "New information available"
         assert result.confidence == 0.95
-        assert result.preserve_as is None
 
     def test_invalidation_preservation(self):
         """Test invalidation with preservation."""
@@ -415,13 +411,11 @@ class TestInvalidationResult:
             status=InvalidationStatus.HISTORICAL,
             reasoning="Outdated but useful context",
             confidence=0.85,
-            preserve_as="historical_context",
         )
 
         assert result.memory_id == "mem_001"
         assert result.status == InvalidationStatus.HISTORICAL
         assert result.confidence == 0.85
-        assert result.preserve_as == "historical_context"
 
 
 class TestRelationshipTypes:
@@ -525,37 +519,3 @@ class TestContextBundle:
         assert len(bundle.entity_context) == 2
         assert len(bundle.conversation_context) == 1
         assert len(bundle.filtered_candidates) == 1
-
-
-class TestFilterStageResult:
-    """Test FilterStageResult model."""
-
-    def test_filter_stage_result_creation(self):
-        """Test basic filter stage result creation."""
-        result = FilterStageResult(
-            stage="temporal",
-            candidates_in=100,
-            candidates_out=50,
-            time_ms=15.5,
-            method="time_window",
-        )
-
-        assert result.stage == "temporal"
-        assert result.candidates_in == 100
-        assert result.candidates_out == 50
-        assert result.time_ms == 15.5
-        assert result.method == "time_window"
-
-    def test_filter_stage_result_effectiveness(self):
-        """Test filter stage result effectiveness calculation."""
-        result = FilterStageResult(
-            stage="similarity",
-            candidates_in=100,
-            candidates_out=20,
-            time_ms=25.0,
-            method="threshold",
-        )
-
-        # Check that filtering reduced candidates
-        assert result.candidates_out < result.candidates_in
-        assert result.candidates_out / result.candidates_in == 0.2

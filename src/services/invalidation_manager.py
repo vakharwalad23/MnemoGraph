@@ -14,11 +14,8 @@ from datetime import datetime, timedelta
 
 from pydantic import BaseModel, Field
 
-from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
-from src.core.memory_store import MemorySyncManager
-from src.core.memory_store.memory_store import MemoryStore
-from src.core.vector_store.base import VectorStore
+from src.core.memory_store import MemoryStore
 from src.models.memory import Memory, MemoryStatus
 from src.models.version import InvalidationResult, InvalidationStatus
 from src.utils.logger import get_logger
@@ -56,9 +53,6 @@ class InvalidationManager:
         self,
         llm: LLMProvider,
         memory_store: MemoryStore,
-        graph_store: GraphStore | None = None,
-        vector_store: VectorStore | None = None,
-        sync_manager: MemorySyncManager | None = None,
     ):
         """
         Initialize invalidation manager.
@@ -66,16 +60,9 @@ class InvalidationManager:
         Args:
             llm: LLM provider for semantic evaluation
             memory_store: MemoryStore facade for unified memory operations
-            graph_store: Optional graph database (for backwards compatibility)
-            vector_store: Optional vector database (for backwards compatibility)
-            sync_manager: Optional sync manager for atomic updates
         """
         self.llm = llm
         self.memory_store = memory_store
-
-        self.graph_store = graph_store
-        self.vector_store = vector_store
-        self.sync_manager = sync_manager
 
         self._worker_task: asyncio.Task | None = None
 
@@ -210,7 +197,7 @@ class InvalidationManager:
         candidates = []
 
         try:
-            old_inactive = await self.graph_store.query_memories(
+            old_inactive = await self.memory_store.graph_store.query_memories(
                 filters={
                     "status": MemoryStatus.ACTIVE.value,
                     "created_before": (datetime.now() - timedelta(days=180)).isoformat(),
