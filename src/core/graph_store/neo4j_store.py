@@ -1,5 +1,5 @@
 """
-Neo4j graph store implementation - redesigned for Phase 2 & 3.
+Neo4j graph store implementation.
 
 Production-grade graph database for complex relationship queries and graph analytics.
 """
@@ -119,10 +119,22 @@ class Neo4jGraphStore(GraphStore):
 
     async def add_node(self, memory: Memory) -> None:
         """
-        Add a memory node to the graph.
+        Add a minimal memory node to the graph.
+
+        Graph store now stores minimal node information only.
+        Full memory data lives in vector store.
+
+        Minimal node contains:
+        - id: For identification
+        - content_preview: First 200 chars for display in graph queries
+        - type: NodeType for filtering
+        - status: MemoryStatus for filtering
+        - version: For version tracking queries
+        - parent_version: For version chain traversal
+        - superseded_by: For version chain traversal
 
         Args:
-            memory: Memory object to store
+            memory: Memory object (only minimal fields extracted)
 
         Raises:
             ValidationError: If memory is invalid
@@ -136,49 +148,35 @@ class Neo4jGraphStore(GraphStore):
         try:
             await self.connect()
 
+            # Extract content preview (first 200 chars)
+            content_preview = memory.content[:200] if memory.content else ""
+
             async with self.driver.session(database=self.database) as session:
                 await session.run(
                     """
                     MERGE (m:Memory {id: $id})
-                    SET m.content = $content,
+                    SET m.content_preview = $content_preview,
                         m.type = $type,
+                        m.status = $status,
                         m.version = $version,
                         m.parent_version = $parent_version,
-                        m.valid_from = $valid_from,
-                        m.valid_until = $valid_until,
-                        m.status = $status,
-                        m.superseded_by = $superseded_by,
-                        m.invalidation_reason = $invalidation_reason,
-                        m.confidence = $confidence,
-                        m.access_count = $access_count,
-                        m.last_accessed = $last_accessed,
-                        m.created_at = $created_at,
-                        m.updated_at = $updated_at,
-                        m.metadata = $metadata
+                        m.superseded_by = $superseded_by
                     """,
                     {
                         "id": memory.id,
-                        "content": memory.content,
+                        "content_preview": content_preview,
                         "type": memory.type.value,
+                        "status": memory.status.value,
                         "version": memory.version,
                         "parent_version": memory.parent_version,
-                        "valid_from": memory.valid_from.isoformat(),
-                        "valid_until": (
-                            memory.valid_until.isoformat() if memory.valid_until else None
-                        ),
-                        "status": memory.status.value,
                         "superseded_by": memory.superseded_by,
-                        "invalidation_reason": memory.invalidation_reason,
-                        "confidence": memory.confidence,
-                        "access_count": memory.access_count,
-                        "last_accessed": (
-                            memory.last_accessed.isoformat() if memory.last_accessed else None
-                        ),
-                        "created_at": memory.created_at.isoformat(),
-                        "updated_at": memory.updated_at.isoformat(),
-                        "metadata": json.dumps(memory.metadata),
                     },
                 )
+
+            logger.debug(
+                f"Added minimal node: {memory.id}",
+                extra={"memory_id": memory.id, "type": memory.type.value},
+            )
         except ValidationError:
             raise
         except Exception as e:
@@ -190,13 +188,21 @@ class Neo4jGraphStore(GraphStore):
 
     async def get_node(self, node_id: str) -> Memory | None:
         """
-        Retrieve a memory node by ID.
+        Retrieve a minimal memory node by ID.
+
+        Note: This returns MINIMAL node data only (id, content_preview, type, status).
+        For full memory data, use MemoryStore.get_memory() which fetches from vector store.
+
+        This method is primarily used for:
+        - Graph traversal operations
+        - Relationship queries
+        - Version chain walking
 
         Args:
             node_id: Node identifier
 
         Returns:
-            Memory or None if not found
+            Memory with minimal fields populated, None if not found
 
         Raises:
             ValidationError: If node_id is invalid
@@ -604,27 +610,35 @@ class Neo4jGraphStore(GraphStore):
     # HELPER METHODS
 
     def _node_to_memory(self, node) -> Memory:
-        """Convert Neo4j node to Memory object."""
+        """
+        Convert Neo4j minimal node to Memory object.
+
+        Creates Memory with minimal fields from graph.
+        Full data should be fetched from vector store via MemoryStore.
+
+        Note: Some fields are set to defaults since they're not in graph store:
+        - content: Uses content_preview (truncated)
+        - embedding: Empty list (stored in vector store)
+        - metadata: Empty dict (stored in vector store)
+        - timestamps: Set to epoch/now (stored in vector store)
+        - access tracking: Defaults (stored in vector store)
+        """
         return Memory(
             id=node["id"],
-            content=node["content"],
+            content=node.get("content_preview", ""),  # Preview only
             type=NodeType(node["type"]),
-            embedding=[],  # Embeddings stored in vector store
+            embedding=[],  # Stored in vector store
             version=node.get("version", 1),
             parent_version=node.get("parent_version"),
-            valid_from=datetime.fromisoformat(node["valid_from"]),
-            valid_until=(
-                datetime.fromisoformat(node["valid_until"]) if node.get("valid_until") else None
-            ),
+            valid_from=datetime.now(),  # Not stored in graph
+            valid_until=None,
             status=MemoryStatus(node["status"]),
             superseded_by=node.get("superseded_by"),
-            invalidation_reason=node.get("invalidation_reason"),
-            confidence=node.get("confidence", 1.0),
-            access_count=node.get("access_count", 0),
-            last_accessed=(
-                datetime.fromisoformat(node["last_accessed"]) if node.get("last_accessed") else None
-            ),
-            created_at=datetime.fromisoformat(node["created_at"]),
-            updated_at=datetime.fromisoformat(node["updated_at"]),
-            metadata=json.loads(node.get("metadata", "{}")),
+            invalidation_reason=None,  # Not stored in graph
+            confidence=1.0,  # Not stored in graph
+            access_count=0,  # Stored in vector store
+            last_accessed=None,  # Stored in vector store
+            created_at=datetime.now(),  # Not stored in graph
+            updated_at=datetime.now(),  # Not stored in graph
+            metadata={},  # Stored in vector store
         )

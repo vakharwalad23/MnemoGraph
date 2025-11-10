@@ -24,25 +24,26 @@ class MemorySyncManager:
     """
     Manages synchronization between graph and vector stores.
 
-    Philosophy:
-    - Graph store = Source of truth (all metadata)
-    - Vector store = Search index (embeddings + content + critical metadata)
+    - Vector store = Source of truth (ALL memory data and metadata)
+    - Graph store = Minimal nodes (id, content_preview, type, status, version info)
 
-    Critical fields synced to vector store:
-    - content (full text for retrieval and display)
-    - embedding (vector representation for semantic search)
-    - status (for filtering active/invalidated memories)
-    - type (for filtering by memory type)
-    - valid_from, valid_until (for temporal queries)
-    - superseded_by (for version tracking)
-    - invalidation_reason (for context)
-    - version (for version tracking)
-    - updated_at (for freshness)
-    - confidence (for filtering)
+    Vector store stores (complete memory):
+    - content (full text)
+    - embedding (vector representation)
+    - metadata (complete metadata dict)
+    - status, type, confidence
+    - all timestamps (created_at, updated_at, valid_from, valid_until)
+    - version info (version, parent_version, superseded_by)
+    - access tracking (access_count, last_accessed)
+    - invalidation info (invalidation_reason)
 
-    Non-synced fields (graph-only):
-    - access_count (only tracked in graph)
-    - last_accessed (only tracked in graph)
+    Graph store stores (minimal node):
+    - id (for relationships)
+    - content_preview (first 200 chars for display)
+    - type, status (for filtering)
+    - version, parent_version, superseded_by (for version chain traversal)
+
+    Sync direction: Vector store (source) -> Graph store (minimal sync)
     """
 
     def __init__(

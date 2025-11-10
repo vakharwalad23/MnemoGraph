@@ -38,34 +38,42 @@ class Memory(BaseModel):
     - Status management: Active, historical, superseded, invalidated
     - Temporal tracking: Creation, updates, validity windows
     - Access patterns: Track usage for intelligent invalidation
+
+    Storage Architecture:
+    - Vector Store: Source of truth - stores ALL fields
+    - Graph Store: Minimal nodes - stores only (id, content_preview, type, status, version info)
+    When to use which store:
+    - For full memory data: Use MemoryStore.get_memory() -> fetches from vector store
+    - For graph traversal: Graph store provides minimal data for relationships
+    - For search: Vector store provides semantic search with full data
     """
 
     # Core identity
     id: str
-    content: str
+    content: str  # Full content in vector store, preview (200 chars) in graph store
     type: NodeType = NodeType.MEMORY
-    embedding: list[float] = Field(default_factory=list)
+    embedding: list[float] = Field(default_factory=list)  # Vector store only
 
-    # Versioning
+    # Versioning (minimal version info in graph store for chain traversal)
     version: int = 1
     parent_version: str | None = None  # ID of previous version
     valid_from: datetime = Field(default_factory=datetime.now)
     valid_until: datetime | None = None  # None = still valid
 
-    # Status
+    # Status (stored in both stores for filtering)
     status: MemoryStatus = MemoryStatus.ACTIVE
-    superseded_by: str | None = None  # ID of newer version
-    invalidation_reason: str | None = None
+    superseded_by: str | None = None  # ID of newer version (in both stores)
+    invalidation_reason: str | None = None  # Vector store only
 
-    # Metadata
+    # Metadata (vector store only - NOT in graph store)
     metadata: dict[str, Any] = Field(default_factory=dict)
     confidence: float = 1.0
 
-    # Access tracking for intelligent invalidation
+    # Access tracking (vector store only - automatic via MemoryStore)
     access_count: int = 0
     last_accessed: datetime | None = None
 
-    # Timestamps
+    # Timestamps (vector store only)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
