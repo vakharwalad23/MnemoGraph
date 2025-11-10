@@ -9,8 +9,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from src.core.memory_store import MemorySyncManager
 from src.models.memory import MemoryStatus
-from src.services.memory_sync import MemorySyncManager, SyncError
+from src.utils.exceptions import SyncError
 
 
 @pytest.mark.integration
