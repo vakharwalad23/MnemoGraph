@@ -16,6 +16,7 @@ from src.config import Config
 from src.core.embeddings.base import Embedder
 from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
+from src.core.memory_store.memory_store import MemoryStore
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, NodeType
 from src.models.relationships import Edge, RelationshipBundle
@@ -71,11 +72,9 @@ class MemoryEngine:
         """
         self.llm = llm
         self.embedder = embedder
-        self.graph_store = graph_store
-        self.vector_store = vector_store
         self.config = config
 
-        # Initialize sync manager first
+        # Initialize sync manager
         self.sync_manager = MemorySyncManager(
             graph_store=graph_store,
             vector_store=vector_store,
@@ -83,7 +82,18 @@ class MemoryEngine:
             retry_delay=0.5,
         )
 
-        # Initialize Phase 2 & 3 services
+        # Initialize MemoryStore facade
+        self.memory_store = MemoryStore(
+            vector_store=vector_store,
+            graph_store=graph_store,
+            sync_manager=self.sync_manager,
+        )
+
+        # Keep direct store references for services that still need them
+        self.graph_store = graph_store
+        self.vector_store = vector_store
+
+        # Initialize services with dependencies
         self.evolution = MemoryEvolutionService(
             llm=llm,
             graph_store=graph_store,
@@ -206,48 +216,51 @@ class MemoryEngine:
             )
             raise MemoryError(f"Unexpected error adding memory: {e}") from e
 
-    async def get_memory(self, memory_id: str, validate: bool = True) -> Memory | None:
+    async def get_memory(
+        self, memory_id: str, validate: bool = True, track_access: bool = True
+    ) -> Memory | None:
         """
         Retrieve a memory by ID.
 
         Args:
             memory_id: Memory identifier
             validate: Whether to check validity on access
+            track_access: Whether to track this access (increments access_count)
 
         Returns:
             Memory or None if not found
+
         Raises:
             ValidationError: If memory_id is invalid
-            GraphStoreError: If graph store operation fails
             VectorStoreError: If vector store operation fails
+            MemoryError: If unexpected error occurs
         """
         if not memory_id:
             raise ValidationError("memory_id is required")
 
         try:
-            # Try graph store first (has full data)
-            memory = await self.graph_store.get_node(memory_id)
-            vector_memory = await self.vector_store.get_memory(memory_id)
+            # Get from MemoryStore
+            memory = await self.memory_store.get_memory(
+                memory_id=memory_id,
+                track_access=track_access,
+                include_relationships=False,
+            )
 
-            if not memory and not vector_memory:
+            if not memory:
                 logger.debug(
                     f"Memory not found: {memory_id}",
                     extra={"memory_id": memory_id, "operation": "get_memory"},
                 )
                 return None
 
-            memory.embedding = vector_memory.embedding if vector_memory else []
-
             # Validate on access if enabled
             if validate and self.config.llm_relationships.enable_auto_invalidation:
                 memory = await self.invalidation.validate_on_access(memory)
 
             return memory
-        except (GraphStoreError, VectorStoreError) as e:
-            logger.error(
-                f"Error getting memory {memory_id}: {e}",
-                extra={"memory_id": memory_id, "operation": "get_memory", "error": str(e)},
-            )
+
+        except (ValidationError, VectorStoreError):
+            # Let these propagate
             raise
         except Exception as e:
             logger.error(
@@ -289,7 +302,7 @@ class MemoryEngine:
             if not current:
                 raise NotFoundError(f"Memory not found: {memory_id}")
 
-            # Evolve memory (Phase 2)
+            # Evolve memory
             evolution = await self.evolution.evolve_memory(current, new_content)
 
             # If new version created, retrieve it
@@ -333,6 +346,7 @@ class MemoryEngine:
 
         Returns:
             Updated memory
+
         Raises:
             ValidationError: If inputs are invalid
             NotFoundError: If memory not found
@@ -349,23 +363,26 @@ class MemoryEngine:
         )
 
         try:
-            memory = await self.get_memory(memory_id, validate=True)
+            # Get from MemoryStore (don't track access for metadata updates)
+            memory = await self.memory_store.get_memory(
+                memory_id=memory_id, track_access=False, include_relationships=False
+            )
             if not memory:
                 raise NotFoundError(f"Memory not found: {memory_id}")
 
             # Update metadata
             if new_metadata:
                 memory.metadata.update(new_metadata)
-                memory.updated_at = datetime.now()
-                await self.graph_store.update_node(memory)
-                await self.sync_manager.sync_memory_full(memory)
+                # Update via MemoryStore
+                await self.memory_store.update_memory(memory)
 
             logger.info(f"Metadata updated for memory: {memory_id}", extra={"memory_id": memory_id})
 
             return memory
+
         except (NotFoundError, ValidationError):
             raise
-        except (GraphStoreError, VectorStoreError, SyncError) as e:
+        except (VectorStoreError, SyncError) as e:
             logger.error(
                 f"Failed to update metadata for {memory_id}: {e}",
                 extra={"memory_id": memory_id, "error": str(e), "error_type": type(e).__name__},
@@ -384,6 +401,7 @@ class MemoryEngine:
 
         Args:
             memory_id: Memory to delete
+
         Raises:
             ValidationError: If memory_id is invalid
             MemoryError: If deletion fails
@@ -397,14 +415,12 @@ class MemoryEngine:
         )
 
         try:
-            # Delete from graph store first (source of truth)
-            await self.graph_store.delete_node(memory_id)
-
-            # Sync deletion to vector store
-            await self.sync_manager.sync_memory_deletion(memory_id)
+            # Delete via MemoryStore
+            await self.memory_store.delete_memory(memory_id)
 
             logger.info(f"Memory deleted: {memory_id}", extra={"memory_id": memory_id})
-        except (GraphStoreError, VectorStoreError, SyncError) as e:
+
+        except (ValidationError, VectorStoreError, GraphStoreError) as e:
             logger.error(
                 f"Failed to delete memory {memory_id}: {e}",
                 extra={"memory_id": memory_id, "error": str(e), "error_type": type(e).__name__},
@@ -425,6 +441,7 @@ class MemoryEngine:
         limit: int = 10,
         filters: dict[str, Any] | None = None,
         score_threshold: float | None = None,
+        track_access: bool = False,
     ) -> list[tuple[Memory, float]]:
         """
         Search for similar memories by semantic meaning.
@@ -434,22 +451,36 @@ class MemoryEngine:
             limit: Maximum results
             filters: Optional filters (status, type, etc.)
             score_threshold: Minimum similarity score
+            track_access: Whether to track access for results (default: False)
 
         Returns:
             List of (Memory, score) tuples
+
+        Raises:
+            EmbeddingError: If embedding generation fails
+            VectorStoreError: If search fails
         """
-        # Generate query embedding
-        query_embedding = await self.embedder.embed(query)
+        try:
+            # Generate query embedding
+            query_embedding = await self.embedder.embed(query)
 
-        # Search vector store
-        results = await self.vector_store.search_similar(
-            vector=query_embedding,
-            limit=limit,
-            filters=filters,
-            score_threshold=score_threshold,
-        )
+            # Search via MemoryStore
+            results = await self.memory_store.search_similar(
+                query_embedding=query_embedding,
+                limit=limit,
+                filters=filters,
+                score_threshold=score_threshold,
+                track_access=track_access,
+            )
 
-        return [(result.memory, result.score) for result in results]
+            return results
+
+        except Exception as e:
+            logger.error(
+                f"Search similar failed: {e}",
+                extra={"query": query[:50], "error": str(e)},
+            )
+            raise
 
     async def query_memories(
         self,
@@ -481,6 +512,7 @@ class MemoryEngine:
         direction: str = "outgoing",
         depth: int = 1,
         limit: int = 100,
+        track_access: bool = True,
     ) -> list[tuple[Memory, Edge]]:
         """
         Get related memories via graph relationships.
@@ -491,16 +523,24 @@ class MemoryEngine:
             direction: "outgoing", "incoming", or "both"
             depth: Traversal depth
             limit: Maximum results
+            track_access: Whether to track access for source memory
 
         Returns:
-            List of tuples with (Memory, Edge)
+            List of tuples with (Memory, Edge) - memories are fetched from vector store
+
+        Raises:
+            ValidationError: If memory_id is invalid
+            GraphStoreError: If graph traversal fails
+            VectorStoreError: If memory fetch fails
         """
-        return await self.graph_store.get_neighbors(
-            node_id=memory_id,
+        # Get neighbors via MemoryStore
+        return await self.memory_store.get_neighbors(
+            memory_id=memory_id,
             relationship_types=relationship_types,
             direction=direction,
             depth=depth,
             limit=limit,
+            track_access=track_access,
         )
 
     async def find_path(self, start_id: str, end_id: str, max_depth: int = 5) -> list[str] | None:
@@ -514,8 +554,13 @@ class MemoryEngine:
 
         Returns:
             List of memory IDs forming path, or None
+
+        Raises:
+            ValidationError: If start_id or end_id is invalid
+            GraphStoreError: If path finding fails
         """
-        return await self.graph_store.find_path(start_id, end_id, max_depth)
+        # Find path via MemoryStore
+        return await self.memory_store.find_path(start_id, end_id, max_depth)
 
     # VERSIONING & HISTORY OPERATIONS
 

@@ -75,7 +75,14 @@ class Memory(BaseModel):
         json_encoders = {datetime: lambda v: v.isoformat()}
 
     def mark_accessed(self) -> None:
-        """Mark memory as accessed (for tracking)."""
+        """
+        Mark memory as accessed (for tracking).
+
+        Note: This method is deprecated. Access tracking is now handled
+        automatically by MemoryStore facade when using get_memory() with
+        track_access=True. This method is kept for backwards compatibility
+        but should not be used in new code.
+        """
         self.access_count += 1
         self.last_accessed = datetime.now()
         self.updated_at = datetime.now()
