@@ -86,27 +86,17 @@ class MultiStageFilter:
         Returns:
             Complete context bundle
         """
-        # STAGE 1: Vector Search (Fast Pre-filtering)
-        # Goal: 1M+ memories → ~100 candidates in 10-50ms
-
         start = time.time()
         vector_candidates = await self._stage1_vector_search(new_memory)
         stage1_time = (time.time() - start) * 1000
-
-        # STAGE 2: Multi-Dimensional Context Gathering (Parallel)
-        # Goal: Gather context from multiple dimensions
 
         start = time.time()
         context_results = await self._stage2_hybrid_filtering(new_memory)
         stage2_time = (time.time() - start) * 1000
 
-        # STAGE 3: LLM Pre-filtering (Smart Filter)
-        # Goal: 50 candidates → 15-20 highly relevant
-
         start = time.time()
         combined_candidates = self._combine_and_deduplicate(vector_candidates, context_results)
 
-        # Get context window from config (default 50)
         context_window = getattr(
             getattr(self.config, "llm_relationships", None), "context_window", 50
         )
@@ -120,7 +110,6 @@ class MultiStageFilter:
 
         stage3_time = (time.time() - start) * 1000
 
-        # Log performance
         logger.info(
             f"Context gathering: Stage1={stage1_time:.1f}ms ({len(vector_candidates)} candidates), "
             f"Stage2={stage2_time:.1f}ms ({len(combined_candidates)} total), "
@@ -129,7 +118,7 @@ class MultiStageFilter:
         )
 
         return ContextBundle(
-            vector_candidates=vector_candidates[:10],  # Top 10 for context
+            vector_candidates=vector_candidates[:10],
             temporal_context=context_results["temporal"],
             graph_context=context_results["graph"],
             entity_context=context_results["entity"],
@@ -153,12 +142,10 @@ class MultiStageFilter:
                 vector=memory.embedding,
                 limit=100,
                 filters={
-                    # Only search active/historical memories
                     "status": ["active", "historical"],
-                    # Optional: Time window for temporal relevance
                     "created_after": (datetime.now() - timedelta(days=90)).isoformat(),
                 },
-                score_threshold=0.3,  # Cosine similarity > 0.3
+                score_threshold=0.3,
             )
 
             return [r.memory for r in results] if results else []
@@ -210,16 +197,14 @@ class MultiStageFilter:
         try:
             cutoff = datetime.now() - timedelta(days=window_days)
 
-            # Use vector search with temporal filter
-            # This gets "recent memories about the same topic"
             results = await self.vector_store.search_similar(
                 vector=memory.embedding,
                 limit=20,
                 filters={
                     "status": ["active"],
-                    "created_after": cutoff.isoformat(),  # Last 30 days
+                    "created_after": cutoff.isoformat(),
                 },
-                score_threshold=0.4,  # Similarity > 0.4 (configurable)
+                score_threshold=0.4,
             )
 
             return [r.memory for r in results] if results else []
@@ -255,7 +240,6 @@ class MultiStageFilter:
             return [n["node"] for n in neighbors if "node" in n]
 
         except Exception:
-            # Node might not exist yet (being created)
             return []
 
     async def _entity_filter(self, memory: Memory) -> list[Memory]:
@@ -270,7 +254,6 @@ class MultiStageFilter:
             List of memories with shared entities
         """
         try:
-            # Use LLM to extract entities from the memory
             entity_prompt = f"""
 Extract key entities from this text. Identify important people, places, organizations, concepts, or technical terms.
 
@@ -286,9 +269,8 @@ Return a JSON object with a list of up to 5 key entities.
             if not result.entities:
                 return []
 
-            # Find memories with these entities
             candidates = []
-            for entity in result.entities[:5]:  # Top 5 entities
+            for entity in result.entities[:5]:
                 try:
                     related = await self.vector_store.search_by_payload(
                         filter={"entities": {"$contains": entity}}, limit=5
@@ -373,7 +355,6 @@ Return JSON array of top {target} most relevant:
 """
 
         try:
-            # Use LLM for pre-filtering
             scores = await self.llm.complete(
                 prompt,
                 response_format=list[RelevanceScore],
@@ -381,7 +362,6 @@ Return JSON array of top {target} most relevant:
                 temperature=0.0,
             )
 
-            # Sort and return top candidates
             sorted_scores = sorted(scores, key=lambda x: x.relevance, reverse=True)
 
             top_ids = {s.id for s in sorted_scores[:target]}
@@ -407,14 +387,11 @@ Return JSON array of top {target} most relevant:
         """
         all_candidates = []
 
-        # Add vector candidates (highest priority)
         all_candidates.extend(vector_candidates[:50])
 
-        # Add context candidates
         for _context_type, memories in context_results.items():
             all_candidates.extend(memories)
 
-        # Deduplicate by ID
         seen = set()
         unique_candidates = []
 

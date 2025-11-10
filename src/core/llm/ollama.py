@@ -40,7 +40,6 @@ class OllamaLLM(LLMProvider):
         self.model = model
         self.timeout = timeout
 
-        # Create async client
         self.client = ollama.AsyncClient(host=host)
 
     async def complete(
@@ -80,24 +79,20 @@ class OllamaLLM(LLMProvider):
                 **kwargs.get("options", {}),
             }
 
-            # Handle structured output
             format_type = None
             messages = [{"role": "user", "content": prompt}]
 
             if response_format:
                 format_type = "json"
 
-                # Create simple example from schema instead of full schema
                 schema = response_format.model_json_schema()
 
-                # Build example JSON structure from schema properties
                 example = {}
                 properties = schema.get("properties", {})
 
                 for field_name, field_info in properties.items():
                     field_type = field_info.get("type", "string")
 
-                    # Create example values based on type
                     if field_type == "string":
                         example[field_name] = f"<{field_name}>"
                     elif field_type == "number" or field_type == "integer":
@@ -128,7 +123,6 @@ IMPORTANT:
 
                 messages = [{"role": "user", "content": enhanced_prompt}]
 
-            # Make request
             response = await self.client.chat(
                 model=self.model,
                 messages=messages,
@@ -145,13 +139,10 @@ IMPORTANT:
             if not content:
                 raise LLMError("Ollama returned empty content")
 
-            # Parse structured output
             if response_format:
                 try:
-                    # Clean JSON if wrapped in markdown
                     cleaned = self._extract_json(content)
 
-                    # Check if LLM returned schema instead of data
                     try:
                         parsed = json.loads(cleaned)
                         if isinstance(parsed, dict) and "properties" in parsed and "type" in parsed:
@@ -160,7 +151,7 @@ IMPORTANT:
                                 "This usually means the prompt needs to be clearer about expecting actual values, not the schema definition."
                             )
                     except json.JSONDecodeError:
-                        pass  # Will be caught below
+                        pass
 
                     return response_format.model_validate_json(cleaned)
                 except ValidationError:
@@ -207,7 +198,6 @@ IMPORTANT:
         """
         content = content.strip()
 
-        # Remove markdown code blocks
         if "```json" in content:
             content = content.split("```json")[1].split("```")[0].strip()
         elif "```" in content:

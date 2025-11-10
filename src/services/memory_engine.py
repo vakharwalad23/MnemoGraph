@@ -74,7 +74,6 @@ class MemoryEngine:
         self.embedder = embedder
         self.config = config
 
-        # Initialize sync manager
         self.sync_manager = MemorySyncManager(
             graph_store=graph_store,
             vector_store=vector_store,
@@ -82,19 +81,16 @@ class MemoryEngine:
             retry_delay=0.5,
         )
 
-        # Initialize MemoryStore facade
         self.memory_store = MemoryStore(
             vector_store=vector_store,
             graph_store=graph_store,
             sync_manager=self.sync_manager,
         )
 
-        # Keep direct store references for infrastructure operations (initialize, close, statistics)
-        # All memory operations should use self.memory_store instead
+        # Direct store references kept for infrastructure operations only (initialize, close, statistics)
         self.graph_store = graph_store
         self.vector_store = vector_store
 
-        # Initialize services with dependencies
         self.evolution = MemoryEvolutionService(
             llm=llm,
             memory_store=self.memory_store,
@@ -132,14 +128,11 @@ class MemoryEngine:
         await self.vector_store.initialize()
         logger.info("Vector store initialized")
 
-        # Start background invalidation worker if enabled
         if self.config.llm_relationships.enable_auto_invalidation:
             self.invalidation.start_background_worker(interval_hours=24)
             logger.info("Background invalidation worker started")
 
         logger.info("Memory Engine ready")
-
-    # CORE MEMORY OPERATIONS
 
     async def add_memory(
         self,
@@ -243,7 +236,6 @@ class MemoryEngine:
             raise ValidationError("memory_id is required")
 
         try:
-            # Get from MemoryStore
             memory = await self.memory_store.get_memory(
                 memory_id=memory_id,
                 track_access=track_access,
@@ -257,14 +249,12 @@ class MemoryEngine:
                 )
                 return None
 
-            # Validate on access if enabled
             if validate and self.config.llm_relationships.enable_auto_invalidation:
                 memory = await self.invalidation.validate_on_access(memory)
 
             return memory
 
         except (ValidationError, VectorStoreError):
-            # Let these propagate
             raise
         except Exception as e:
             logger.error(
@@ -301,17 +291,14 @@ class MemoryEngine:
         )
 
         try:
-            # Get current memory from MemoryStore (source of truth)
             current = await self.memory_store.get_memory(
                 memory_id=memory_id, track_access=False, include_relationships=False
             )
             if not current:
                 raise NotFoundError(f"Memory not found: {memory_id}")
 
-            # Evolve memory
             evolution = await self.evolution.evolve_memory(current, new_content)
 
-            # If new version created, retrieve it
             if evolution.new_version:
                 new_memory = await self.memory_store.get_memory(
                     memory_id=evolution.new_version, track_access=False, include_relationships=False
@@ -322,7 +309,6 @@ class MemoryEngine:
                 )
                 return new_memory, evolution
 
-            # For augment or preserve, return the current memory
             updated_memory = await self.memory_store.get_memory(
                 memory_id=memory_id, track_access=False, include_relationships=False
             )
@@ -373,17 +359,14 @@ class MemoryEngine:
         )
 
         try:
-            # Get from MemoryStore (don't track access for metadata updates)
             memory = await self.memory_store.get_memory(
                 memory_id=memory_id, track_access=False, include_relationships=False
             )
             if not memory:
                 raise NotFoundError(f"Memory not found: {memory_id}")
 
-            # Update metadata
             if new_metadata:
                 memory.metadata.update(new_metadata)
-                # Update via MemoryStore
                 await self.memory_store.update_memory(memory)
 
             logger.info(f"Metadata updated for memory: {memory_id}", extra={"memory_id": memory_id})
@@ -425,7 +408,6 @@ class MemoryEngine:
         )
 
         try:
-            # Delete via MemoryStore
             await self.memory_store.delete_memory(memory_id)
 
             logger.info(f"Memory deleted: {memory_id}", extra={"memory_id": memory_id})
@@ -442,8 +424,6 @@ class MemoryEngine:
                 extra={"memory_id": memory_id, "error": str(e)},
             )
             raise MemoryError(f"Unexpected error deleting memory: {e}") from e
-
-    # SEARCH & QUERY OPERATIONS
 
     async def search_similar(
         self,
@@ -471,10 +451,8 @@ class MemoryEngine:
             VectorStoreError: If search fails
         """
         try:
-            # Generate query embedding
             query_embedding = await self.embedder.embed(query)
 
-            # Search via MemoryStore
             results = await self.memory_store.search_similar(
                 query_embedding=query_embedding,
                 limit=limit,
@@ -543,7 +521,6 @@ class MemoryEngine:
             GraphStoreError: If graph traversal fails
             VectorStoreError: If memory fetch fails
         """
-        # Get neighbors via MemoryStore
         return await self.memory_store.get_neighbors(
             memory_id=memory_id,
             relationship_types=relationship_types,
@@ -569,10 +546,7 @@ class MemoryEngine:
             ValidationError: If start_id or end_id is invalid
             GraphStoreError: If path finding fails
         """
-        # Find path via MemoryStore
         return await self.memory_store.find_path(start_id, end_id, max_depth)
-
-    # VERSIONING & HISTORY OPERATIONS
 
     async def get_version_history(self, memory_id: str) -> VersionChain:
         """
@@ -613,8 +587,6 @@ class MemoryEngine:
         query_embedding = await self.embedder.embed(query)
 
         return await self.evolution.time_travel_query(query_embedding, as_of, limit)
-
-    # INVALIDATION OPERATIONS
 
     async def check_memory_validity(self, memory_id: str) -> InvalidationResult:
         """
@@ -684,15 +656,12 @@ class MemoryEngine:
         Returns:
             Statistics dictionary
         """
-        # Count nodes by status
         active_count = await self.graph_store.count_nodes({"status": "active"})
         historical_count = await self.graph_store.count_nodes({"status": "historical"})
         superseded_count = await self.graph_store.count_nodes({"status": "superseded"})
 
-        # Count edges
         total_edges = await self.graph_store.count_edges()
 
-        # Count vector store memories
         vector_count = await self.vector_store.count_memories()
 
         return {

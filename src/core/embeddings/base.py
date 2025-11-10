@@ -74,7 +74,7 @@ class Embedder(ABC):
     async def close(self):
         """
         Close any open connections.
+
         Optional to override if provider needs cleanup.
         """
-        # Default implementation does nothing
-        # Providers should override if cleanup is needed
+        pass

@@ -73,15 +73,11 @@ class InvalidationManager:
         self.llm = llm
         self.memory_store = memory_store
 
-        # Keep legacy references for now (will be removed later)
         self.graph_store = graph_store
         self.vector_store = vector_store
         self.sync_manager = sync_manager
 
-        # Background worker task
         self._worker_task: asyncio.Task | None = None
-
-    # 1. ON-DEMAND INVALIDATION (Lazy Evaluation)
 
     async def validate_on_access(self, memory: Memory, current_context: str = "") -> Memory:
         """
@@ -99,25 +95,18 @@ class InvalidationManager:
         Returns:
             Updated memory (may have changed status)
         """
-        # Check if already invalidated
         if memory.status != MemoryStatus.ACTIVE:
-            # Update via MemoryStore
             await self.memory_store.update_memory(memory)
             return memory
 
-        # Decide if validation is needed
         if not self._should_validate(memory):
-            # No validation needed, just return
             return memory
 
-        # Perform validation
         result = await self.check_invalidation(memory, current_context)
 
         if result.status != InvalidationStatus.ACTIVE:
-            # Mark as invalidated
             memory = await self._mark_invalidated(memory, result)
         else:
-            # Update last_validated timestamp
             memory.metadata["last_validated"] = datetime.now().isoformat()
             await self.memory_store.update_memory(memory)
 
@@ -141,25 +130,20 @@ class InvalidationManager:
         last_validated = memory.metadata.get("last_validated")
 
         if not last_validated:
-            return True  # Never validated
+            return True
 
         last_validated_dt = datetime.fromisoformat(last_validated)
         days_since_validation = (datetime.now() - last_validated_dt).days
 
         age_days = memory.age_days()
 
-        # Recent memories (< 30 days): validate every 90 days
         if age_days < 30:
             return days_since_validation > 90
 
-        # Old memories (> 180 days): validate every 14 days
         if age_days > 180:
             return days_since_validation > 14
 
-        # Medium age: validate every 30 days
         return days_since_validation > 30
-
-    # 2. PROACTIVE INVALIDATION (Background Worker)
 
     def start_background_worker(self, interval_hours: int = 24):
         """
@@ -175,7 +159,6 @@ class InvalidationManager:
         """Stop background invalidation worker."""
         if self._worker_task and not self._worker_task.done():
             self._worker_task.cancel()
-            # Note: Task will be awaited in memory_engine.close()
 
     async def _invalidation_worker(self, interval_hours: int):
         """
@@ -188,22 +171,18 @@ class InvalidationManager:
             try:
                 logger.info("Starting periodic memory validation")
 
-                # Find memories that need validation
                 candidates = await self._find_validation_candidates()
 
                 logger.info(f"Found {len(candidates)} memories to validate")
 
-                # Validate in batches
                 batch_size = 10
                 for i in range(0, len(candidates), batch_size):
                     batch = candidates[i : i + batch_size]
 
-                    # Validate batch in parallel
                     tasks = [self._validate_candidate(mem) for mem in batch]
 
                     await asyncio.gather(*tasks, return_exceptions=True)
 
-                    # Small delay between batches
                     await asyncio.sleep(1)
 
                 logger.info("Periodic validation complete")
@@ -214,7 +193,6 @@ class InvalidationManager:
             except Exception as e:
                 logger.error(f"Error in validation worker: {e}")
 
-            # Wait for next run
             await asyncio.sleep(interval_hours * 3600)
 
     async def _find_validation_candidates(self) -> list[Memory]:
@@ -231,7 +209,6 @@ class InvalidationManager:
         """
         candidates = []
 
-        # Priority: Old, rarely accessed
         try:
             old_inactive = await self.graph_store.query_memories(
                 filters={
@@ -243,9 +220,9 @@ class InvalidationManager:
             )
             candidates.extend(old_inactive)
         except Exception:
-            pass  # Graph store may not support these queries yet
+            pass
 
-        return candidates[:100]  # Limit to 100 per run
+        return candidates[:100]
 
     async def _validate_candidate(self, memory: Memory):
         """
@@ -255,23 +232,18 @@ class InvalidationManager:
             memory: Memory to validate
         """
         try:
-            # Get context
             context = await self._get_memory_context(memory)
 
-            # Check invalidation
             result = await self.check_invalidation(memory, context)
 
             if result.status != InvalidationStatus.ACTIVE:
                 await self._mark_invalidated(memory, result)
             else:
-                # Update last_validated
                 memory.metadata["last_validated"] = datetime.now().isoformat()
                 await self.memory_store.update_memory(memory)
 
         except Exception as e:
             logger.error(f"Error validating {memory.id}: {e}")
-
-    # 3. EVENT-DRIVEN INVALIDATION
 
     async def check_supersession(
         self, new_memory: Memory, similar_memories: list[Memory]
@@ -289,13 +261,11 @@ class InvalidationManager:
         superseded = []
 
         for candidate in similar_memories:
-            # Only check highly similar memories
             similarity = self._calculate_similarity(new_memory.embedding, candidate.embedding)
 
             if similarity < 0.7:
                 continue
 
-            # Ask LLM: Does new memory supersede this one?
             current_dt = datetime.now()
 
             prompt = f"""[CURRENT DATE/TIME: {current_dt.strftime('%Y-%m-%d %H:%M:%S')}]
@@ -339,13 +309,11 @@ Respond with JSON:
                 )
 
                 if result.action == "supersede":
-                    # Mark as superseded
                     candidate.status = MemoryStatus.SUPERSEDED
                     candidate.valid_until = datetime.now()
                     candidate.superseded_by = new_memory.id
                     candidate.invalidation_reason = result.reasoning
 
-                    # Update via MemoryStore (handles both stores)
                     await self.memory_store.update_memory(candidate)
 
                     superseded.append(candidate)
@@ -354,8 +322,6 @@ Respond with JSON:
                 logger.error(f"Error checking supersession for {candidate.id}: {e}")
 
         return superseded
-
-    # SHARED UTILITIES
 
     async def check_invalidation(self, memory: Memory, context: str = "") -> InvalidationResult:
         """
@@ -441,13 +407,12 @@ Respond with JSON:
             Context string
         """
         try:
-            # Get neighbors via MemoryStore
             neighbors = await self.memory_store.get_neighbors(
                 memory_id=memory.id,
                 direction="both",
                 depth=1,
                 limit=5,
-                track_access=False,  # Don't track access for context gathering
+                track_access=False,
             )
 
             if not neighbors:
@@ -476,10 +441,8 @@ Respond with JSON:
         """
         import math
 
-        # Dot product
         dot_product = sum(a * b for a, b in zip(embedding1, embedding2, strict=False))
 
-        # Magnitudes
         mag1 = math.sqrt(sum(a * a for a in embedding1))
         mag2 = math.sqrt(sum(b * b for b in embedding2))
 

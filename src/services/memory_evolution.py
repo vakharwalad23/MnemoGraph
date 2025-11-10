@@ -99,10 +99,8 @@ class MemoryEvolutionService:
         analysis = await self._analyze_evolution(current, new_info)
 
         if analysis.action in ["update", "replace"]:
-            # Create new version
             new_version = await self._create_new_version(current, new_info, analysis)
 
-            # Mark current as superseded
             current.status = MemoryStatus.SUPERSEDED
             current.valid_until = datetime.now()
             current.superseded_by = new_version.id
@@ -121,15 +119,13 @@ class MemoryEvolutionService:
                     change_type=analysis.action,
                     reasoning=analysis.reasoning,
                     description=analysis.change_description,
-                    changed_fields=["content"],  # Track what changed
+                    changed_fields=["content"],
                 ),
             )
 
         elif analysis.action == "augment":
-            # Add to existing memory without versioning
             current.content = f"{current.content}\n\nUpdate: {new_info}"
 
-            # Generate new embedding
             current.embedding = await self.embedder.embed(current.content)
 
             current.metadata["augmented"] = current.metadata.get("augmented", 0) + 1
@@ -354,7 +350,6 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             valid_memories = []
             for result in similar_results:
                 memory = result.memory
-                # Check if memory was valid at the specified time
                 if memory.valid_from <= as_of and (
                     memory.valid_until is None or memory.valid_until > as_of
                 ):
@@ -365,23 +360,18 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
 
             return valid_memories[:limit]
 
-        # Fallback: Temporal-only filtering (no semantic search)
-        # Use Neo4j's temporal filtering capabilities
         filters = {
             "created_before": as_of.isoformat(),
         }
 
-        # Get all candidates that could have been valid at that time
         candidates = await self.graph_store.query_memories(
             filters=filters,
             order_by="created_at DESC",
-            limit=limit * 3,  # Get more candidates to ensure we have enough valid ones
+            limit=limit * 3,
         )
 
-        # Filter to memories that were temporally valid at the specified time
         valid_memories = []
         for memory in candidates:
-            # Check temporal validity window
             if memory.valid_from <= as_of and (
                 memory.valid_until is None or memory.valid_until > as_of
             ):
@@ -407,7 +397,6 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
         """
         memory = await self.graph_store.get_node(memory_id)
 
-        # Follow supersession chain
         while memory.superseded_by:
             memory = await self.graph_store.get_node(memory.superseded_by)
 
@@ -436,7 +425,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             id=f"{current.id}_rollback_{datetime.now().timestamp()}",
             content=target.content,
             type=target.type,
-            embedding=target.embedding,  # Reuse embedding
+            embedding=target.embedding,
             version=current.version + 1,
             parent_version=current.id,
             valid_from=datetime.now(),

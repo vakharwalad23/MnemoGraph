@@ -38,9 +38,8 @@ class OllamaEmbedder(Embedder):
         self.host = host
         self.model = model
         self.timeout = timeout
-        self._dimension = None  # Cache dimension
+        self._dimension = None
 
-        # Create async client
         self.client = ollama.AsyncClient(host=host)
 
     async def embed(self, text: str, **kwargs) -> list[float]:
@@ -99,7 +98,6 @@ class OllamaEmbedder(Embedder):
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
 
-            # Process batch concurrently
             tasks = [self.embed(text, **kwargs) for text in batch]
             batch_embeddings = await asyncio.gather(*tasks)
 
@@ -109,8 +107,7 @@ class OllamaEmbedder(Embedder):
 
     async def get_dimension(self) -> int:
         """
-        Get embedding dimension.
-        Caches result after first call.
+        Get embedding dimension (cached after first call).
 
         Returns:
             Embedding vector dimension

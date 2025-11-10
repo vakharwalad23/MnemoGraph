@@ -82,9 +82,7 @@ class OpenAILLM(LLMProvider):
         }
 
         try:
-            # Use structured outputs if response format provided
             if response_format:
-                # OpenAI's native structured output support (Parse API)
                 response = await self.client.beta.chat.completions.parse(
                     **params, response_format=response_format
                 )
@@ -95,7 +93,6 @@ class OpenAILLM(LLMProvider):
 
                 return parsed
 
-            # Regular completion
             response = await self.client.chat.completions.create(**params)
             content = response.choices[0].message.content
 

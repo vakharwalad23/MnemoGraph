@@ -66,11 +66,9 @@ class LLMRelationshipEngine:
         self.memory_store = memory_store
         self.config = config
 
-        # Keep legacy references for now
         self.vector_store = vector_store
         self.graph_store = graph_store
 
-        # Initialize sub-systems
         self.filter = MultiStageFilter(vector_store, graph_store, llm_provider, config)
 
         self.invalidation = InvalidationManager(
@@ -95,23 +93,17 @@ class LLMRelationshipEngine:
         """
         start_time = time.time()
 
-        # Step 1: Gather context (multi-stage filtering)
         logger.info(f"Gathering context for memory: {memory.id[:8]}")
         context = await self.filter.gather_context(memory)
 
-        # Step 2: Build comprehensive extraction prompt
         prompt = self._build_extraction_prompt(memory, context)
 
-        # Step 3: Parallel operations
-        # - LLM extraction
-        # - MemoryStore creation (handles vector + graph)
         logger.debug("Extracting relationships with LLM")
 
         extraction_task = self.llm.complete(
             prompt, response_format=RelationshipBundle, max_tokens=2000, temperature=0.0
         )
 
-        # Create memory via MemoryStore (handles both stores)
         memory_creation_task = self.memory_store.create_memory(memory)
 
         results = await asyncio.gather(
@@ -125,7 +117,6 @@ class LLMRelationshipEngine:
             logger.error(f"LLM extraction failed (took {extraction_time:.0f}ms)")
             return RelationshipBundle(memory_id=memory.id, relationships=[], derived_insights=[])
 
-        # Step 4: Create edges in parallel
         logger.debug(f"Creating {len(extraction.relationships)} relationship edges")
         edge_tasks = []
 
@@ -141,13 +132,10 @@ class LLMRelationshipEngine:
         if edge_tasks:
             await asyncio.gather(*edge_tasks, return_exceptions=True)
 
-        # Step 5: Handle derived memories
         if extraction.derived_insights:
             logger.debug(f"Creating {len(extraction.derived_insights)} derived memories")
             await self._create_derived_memories(extraction.derived_insights, memory)
 
-        # Step 6: Event-driven invalidation check
-        # Check if this new memory supersedes any existing ones
         if context.vector_candidates:
             logger.debug("Checking for supersession")
             superseded = await self.invalidation.check_supersession(
@@ -371,13 +359,10 @@ Begin extraction:
                 continue
 
             try:
-                # Generate unique ID
                 derived_id = f"derived_{source_memory.id}_{hash(insight.content) % 10000}"
 
-                # Generate embedding
                 embedding = await self.embedder.embed(insight.content)
 
-                # Create derived memory
                 derived = Memory(
                     id=derived_id,
                     content=insight.content,
@@ -393,10 +378,8 @@ Begin extraction:
                     confidence=insight.confidence,
                 )
 
-                # Create via MemoryStore (handles both stores)
                 await self.memory_store.create_memory(derived)
 
-                # Create DERIVED_FROM edges
                 for source_id in insight.source_ids:
                     await self.memory_store.add_relationship(
                         Edge(

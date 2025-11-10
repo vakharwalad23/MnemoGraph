@@ -12,21 +12,21 @@ from pydantic import BaseModel, Field
 class NodeType(str, Enum):
     """Types of nodes in the memory graph."""
 
-    MEMORY = "MEMORY"  # User-created memory
-    DERIVED = "DERIVED"  # LLM-synthesized insight
-    TOPIC = "TOPIC"  # Cluster/category
-    ENTITY = "ENTITY"  # Extracted entity
-    DOCUMENT = "DOCUMENT"  # Document node
-    CHUNK = "CHUNK"  # Document chunk
+    MEMORY = "MEMORY"
+    DERIVED = "DERIVED"
+    TOPIC = "TOPIC"
+    ENTITY = "ENTITY"
+    DOCUMENT = "DOCUMENT"
+    CHUNK = "CHUNK"
 
 
 class MemoryStatus(str, Enum):
     """Memory lifecycle status."""
 
-    ACTIVE = "active"  # Currently valid and relevant
-    HISTORICAL = "historical"  # Outdated but preserved as history
-    SUPERSEDED = "superseded"  # Replaced by newer version
-    INVALIDATED = "invalidated"  # No longer relevant
+    ACTIVE = "active"
+    HISTORICAL = "historical"
+    SUPERSEDED = "superseded"
+    INVALIDATED = "invalidated"
 
 
 class Memory(BaseModel):
@@ -50,30 +50,30 @@ class Memory(BaseModel):
 
     # Core identity
     id: str
-    content: str  # Full content in vector store, preview (200 chars) in graph store
+    content: str
     type: NodeType = NodeType.MEMORY
-    embedding: list[float] = Field(default_factory=list)  # Vector store only
+    embedding: list[float] = Field(default_factory=list)
 
-    # Versioning (minimal version info in graph store for chain traversal)
+    # Versioning
     version: int = 1
-    parent_version: str | None = None  # ID of previous version
+    parent_version: str | None = None
     valid_from: datetime = Field(default_factory=datetime.now)
-    valid_until: datetime | None = None  # None = still valid
+    valid_until: datetime | None = None
 
-    # Status (stored in both stores for filtering)
+    # Status
     status: MemoryStatus = MemoryStatus.ACTIVE
-    superseded_by: str | None = None  # ID of newer version (in both stores)
-    invalidation_reason: str | None = None  # Vector store only
+    superseded_by: str | None = None
+    invalidation_reason: str | None = None
 
-    # Metadata (vector store only - NOT in graph store)
+    # Metadata
     metadata: dict[str, Any] = Field(default_factory=dict)
     confidence: float = 1.0
 
-    # Access tracking (vector store only - automatic via MemoryStore)
+    # Access tracking
     access_count: int = 0
     last_accessed: datetime | None = None
 
-    # Timestamps (vector store only)
+    # Timestamps
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
@@ -96,7 +96,12 @@ class Memory(BaseModel):
         self.updated_at = datetime.now()
 
     def is_valid(self) -> bool:
-        """Check if memory is currently valid."""
+        """
+        Check if memory is currently valid.
+
+        Returns:
+            True if memory is active and within validity window
+        """
         if self.status != MemoryStatus.ACTIVE:
             return False
 
@@ -106,11 +111,21 @@ class Memory(BaseModel):
         return True
 
     def age_days(self) -> int:
-        """Get age of memory in days."""
+        """
+        Get age of memory in days.
+
+        Returns:
+            Number of days since memory was created
+        """
         return (datetime.now() - self.created_at).days
 
     def days_since_access(self) -> int | None:
-        """Get days since last access."""
+        """
+        Get days since last access.
+
+        Returns:
+            Number of days since last access, or None if never accessed
+        """
         if self.last_accessed is None:
             return None
         return (datetime.now() - self.last_accessed).days

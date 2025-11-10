@@ -115,8 +115,6 @@ class Neo4jGraphStore(GraphStore):
             )
             raise GraphStoreError(f"Failed to initialize Neo4j: {e}") from e
 
-    # NODE OPERATIONS
-
     async def add_node(self, memory: Memory) -> None:
         """
         Add a minimal memory node to the graph.
@@ -318,8 +316,6 @@ class Neo4jGraphStore(GraphStore):
 
             return memories
 
-    # EDGE OPERATIONS
-
     async def add_edge(self, edge: dict[str, Any] | Edge) -> str:
         """Add an edge between two nodes."""
         await self.connect()
@@ -468,8 +464,6 @@ class Neo4jGraphStore(GraphStore):
 
         async with self.driver.session(database=self.database) as session:
             await session.run("MATCH ()-[r {id: $edge_id}]->() DELETE r", {"edge_id": edge_id})
-
-    # GRAPH TRAVERSAL
 
     async def get_neighbors(
         self,

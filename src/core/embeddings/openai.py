@@ -19,7 +19,6 @@ class OpenAIEmbedder(Embedder):
     Supports models like text-embedding-3-small, text-embedding-3-large, etc.
     """
 
-    # Known dimensions for OpenAI embedding models
     _MODEL_DIMENSIONS = {
         "text-embedding-3-small": 1536,
         "text-embedding-3-large": 3072,
@@ -110,7 +109,6 @@ class OpenAIEmbedder(Embedder):
         try:
             embeddings = []
 
-            # Process in batches
             for i in range(0, len(texts), batch_size):
                 batch = texts[i : i + batch_size]
 
@@ -121,7 +119,6 @@ class OpenAIEmbedder(Embedder):
                 if not response.data:
                     raise EmbeddingError("OpenAI returned empty batch embedding response")
 
-                # Extract embeddings (response.data is already ordered)
                 batch_embeddings = [item.embedding for item in response.data]
                 embeddings.extend(batch_embeddings)
 
@@ -150,11 +147,9 @@ class OpenAIEmbedder(Embedder):
         Returns:
             Embedding vector dimension
         """
-        # Return known dimension if available
         if self.model in self._MODEL_DIMENSIONS:
             return self._MODEL_DIMENSIONS[self.model]
 
-        # Otherwise, generate test embedding
         return await super().get_dimension()
 
     async def close(self):

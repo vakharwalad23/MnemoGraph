@@ -15,44 +15,42 @@ class RelationshipType(str, Enum):
     """Types of relationships between memories."""
 
     # Semantic
-    SIMILAR_TO = "SIMILAR_TO"  # Semantically similar
-    REFERENCES = "REFERENCES"  # Mentions/cites
+    SIMILAR_TO = "SIMILAR_TO"
+    REFERENCES = "REFERENCES"
 
     # Temporal/Causal
-    PRECEDES = "PRECEDES"  # Comes before
-    FOLLOWS = "FOLLOWS"  # Comes after
-    UPDATES = "UPDATES"  # Updates/corrects
+    PRECEDES = "PRECEDES"
+    FOLLOWS = "FOLLOWS"
+    UPDATES = "UPDATES"
 
     # Hierarchical
-    PART_OF = "PART_OF"  # Component of larger whole
-    BELONGS_TO = "BELONGS_TO"  # Member of category
-    PARENT_OF = "PARENT_OF"  # Parent in hierarchy
+    PART_OF = "PART_OF"
+    BELONGS_TO = "BELONGS_TO"
+    PARENT_OF = "PARENT_OF"
 
     # Logical
-    CONTRADICTS = "CONTRADICTS"  # Conflicts with
-    SUPPORTS = "SUPPORTS"  # Provides evidence for
-    REQUIRES = "REQUIRES"  # Prerequisite
-    DEPENDS_ON = "DEPENDS_ON"  # Dependency
+    CONTRADICTS = "CONTRADICTS"
+    SUPPORTS = "SUPPORTS"
+    REQUIRES = "REQUIRES"
+    DEPENDS_ON = "DEPENDS_ON"
 
     # Synthesis
-    DERIVED_FROM = "DERIVED_FROM"  # Synthesized from
-    SYNTHESIZES = "SYNTHESIZES"  # Creates synthesis
+    DERIVED_FROM = "DERIVED_FROM"
+    SYNTHESIZES = "SYNTHESIZES"
 
     # Entity
-    CO_OCCURS = "CO_OCCURS"  # Shared entities
-    MENTIONS = "MENTIONS"  # Mentions entity
+    CO_OCCURS = "CO_OCCURS"
+    MENTIONS = "MENTIONS"
 
     # Conversation
-    RESPONDS_TO = "RESPONDS_TO"  # Response in conversation
+    RESPONDS_TO = "RESPONDS_TO"
 
 
 class Edge(BaseModel):
-    """
-    Relationship edge between two nodes.
-    """
+    """Relationship edge between two nodes."""
 
-    source: str  # Source node ID
-    target: str  # Target node ID
+    source: str
+    target: str
     type: RelationshipType
     confidence: float = 1.0
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -114,15 +112,13 @@ class RelationshipBundle(BaseModel):
 
 
 class ContextBundle(BaseModel):
-    """
-    Complete context gathered for relationship extraction.
-    """
+    """Complete context gathered for relationship extraction."""
 
-    model_config = {"extra": "ignore"}  # Ignore extra fields
+    model_config = {"extra": "ignore"}
 
-    vector_candidates: list[Memory] = Field(default_factory=list)  # Top vector matches
-    temporal_context: list[Memory] = Field(default_factory=list)  # Recent memories
-    graph_context: list[Memory] = Field(default_factory=list)  # Graph neighbors
-    entity_context: list[Memory] = Field(default_factory=list)  # Shared entities
-    conversation_context: list[Memory] = Field(default_factory=list)  # Thread context
-    filtered_candidates: list[Memory] = Field(default_factory=list)  # Final filtered set
+    vector_candidates: list[Memory] = Field(default_factory=list)
+    temporal_context: list[Memory] = Field(default_factory=list)
+    graph_context: list[Memory] = Field(default_factory=list)
+    entity_context: list[Memory] = Field(default_factory=list)
+    conversation_context: list[Memory] = Field(default_factory=list)
+    filtered_candidates: list[Memory] = Field(default_factory=list)

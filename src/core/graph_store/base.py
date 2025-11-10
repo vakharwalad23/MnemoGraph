@@ -24,8 +24,6 @@ class GraphStore(ABC):
         """
         pass
 
-    # NODE OPERATIONS (Memory nodes)
-
     @abstractmethod
     async def add_node(self, memory: Memory) -> None:
         """
@@ -117,8 +115,6 @@ class GraphStore(ABC):
         """
         pass
 
-    # EDGE OPERATIONS (Relationships)
-
     @abstractmethod
     async def add_edge(self, edge: dict[str, Any] | Edge) -> str:
         """
@@ -182,8 +178,6 @@ class GraphStore(ABC):
         """
         pass
 
-    # GRAPH TRAVERSAL
-
     @abstractmethod
     async def get_neighbors(
         self,
@@ -222,8 +216,6 @@ class GraphStore(ABC):
             List of node IDs forming the path, or None
         """
         pass
-
-    # UTILITY METHODS
 
     @abstractmethod
     async def count_nodes(self, filters: dict[str, Any] | None = None) -> int:

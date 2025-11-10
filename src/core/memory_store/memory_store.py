@@ -64,8 +64,6 @@ class MemoryStore:
         self.sync_manager = sync_manager
         logger.info("MemoryStore facade initialized")
 
-    # MEMORY CRUD OPERATIONS
-
     async def get_memory(
         self,
         memory_id: str,
@@ -288,8 +286,6 @@ class MemoryStore:
             )
             raise MemoryError(f"Failed to delete memory: {e}") from e
 
-    # RELATIONSHIP OPERATIONS
-
     async def get_relationships(
         self,
         memory_id: str,
@@ -376,8 +372,6 @@ class MemoryStore:
                 extra={"error": str(e)},
             )
             raise MemoryError(f"Failed to add relationship: {e}") from e
-
-    # SEARCH OPERATIONS
 
     async def search_similar(
         self,
@@ -531,8 +525,6 @@ class MemoryStore:
                 extra={"start_id": start_id, "end_id": end_id, "error": str(e)},
             )
             raise MemoryError(f"Failed to find path: {e}") from e
-
-    # ACCESS TRACKING (INTERNAL)
 
     async def _track_access(self, memory_id: str) -> None:
         """
