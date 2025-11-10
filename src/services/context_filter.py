@@ -135,7 +135,7 @@ class MultiStageFilter:
         """
         try:
             results = await self.memory_store.search_similar(
-                embedding=memory.embedding,
+                query_embedding=memory.embedding,
                 limit=100,
                 filters={
                     "status": ["active", "historical"],
@@ -145,7 +145,7 @@ class MultiStageFilter:
                 score_threshold=0.3,
             )
 
-            return [r.memory for r in results] if results else []
+            return [r[0] for r in results] if results else []
 
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
@@ -195,7 +195,7 @@ class MultiStageFilter:
             cutoff = datetime.now() - timedelta(days=window_days)
 
             results = await self.memory_store.search_similar(
-                embedding=memory.embedding,
+                query_embedding=memory.embedding,
                 limit=20,
                 filters={
                     "status": ["active"],
@@ -205,7 +205,7 @@ class MultiStageFilter:
                 score_threshold=0.4,
             )
 
-            return results if results else []
+            return [r[0] for r in results] if results else []
 
         except Exception:
             return []
@@ -385,10 +385,28 @@ Return JSON array of top {target} most relevant:
         """
         all_candidates = []
 
-        all_candidates.extend(vector_candidates[:50])
+        # Extract Memory objects from vector_candidates (should already be Memory objects)
+        for candidate in vector_candidates[:50]:
+            if isinstance(candidate, tuple):
+                # Handle tuple (Memory, score) if somehow passed
+                all_candidates.append(candidate[0])
+            elif hasattr(candidate, "id"):
+                all_candidates.append(candidate)
+            else:
+                logger.warning(f"Unexpected candidate type: {type(candidate)}")
+                continue
 
+        # Extract Memory objects from context_results
         for _context_type, memories in context_results.items():
-            all_candidates.extend(memories)
+            for memory in memories:
+                if isinstance(memory, tuple):
+                    # Handle tuple (Memory, score) or (Memory, Edge) if somehow passed
+                    all_candidates.append(memory[0])
+                elif hasattr(memory, "id"):
+                    all_candidates.append(memory)
+                else:
+                    logger.warning(f"Unexpected memory type in {_context_type}: {type(memory)}")
+                    continue
 
         seen = set()
         unique_candidates = []
