@@ -70,8 +70,7 @@ graph TB
     end
 
     subgraph Facade["🏗️ MemoryStore Facade"]
-        MemStore["MemoryStore<br/>• Unified CRUD<br/>• Access Tracking<br/>• Search Operations"]
-        SyncMgr["Memory Sync Manager<br/>• Retry Logic<br/>• Validation<br/>• Repair<br/>• Batch Ops"]
+        MemStore["MemoryStore<br/>• Unified CRUD<br/>• Access Tracking<br/>• Search Operations<br/>• Retry Logic<br/>• Embedding Preservation"]
     end
 
     subgraph Storage["💾 Storage Layer"]
@@ -93,17 +92,13 @@ graph TB
     Evolution --> MemStore
     Invalid --> MemStore
 
-    MemStore --> SyncMgr
     MemStore --> Vector
     MemStore --> Graph
-    SyncMgr --> Vector
-    SyncMgr --> Graph
 
     style FastAPI fill:#e1f5ff
     style MemEngine fill:#fff4e1
     style LLMRel fill:#f0e1ff
     style MemStore fill:#ffe1ff
-    style SyncMgr fill:#e1ffe1
     style Vector fill:#ffe1e1
     style Graph fill:#ffe1e1
 ```
@@ -117,6 +112,8 @@ graph TB
 - Consistent CRUD operations across stores
 - Search operations (vector + graph)
 - Relationship management
+- Inline retry logic for update operations (2 attempts with 0.5s delay)
+- Automatic embedding preservation (retrieves from vector store if missing)
 - All services use this facade (no direct store access)
 
 **💾 Storage Architecture**
@@ -130,14 +127,6 @@ graph TB
   - Only stores: id, content_preview, type, status, version info
   - Full relationship data (edges with metadata)
   - Graph traversal and queries
-
-**🔄 Memory Sync Manager**
-
-- Automatic retry logic with exponential backoff
-- Consistency validation between stores
-- Self-healing repair mechanism
-- Efficient batch operations
-- Syncs minimal node data from vector store to graph store
 
 **🤖 LLM Relationship Engine**
 
@@ -206,7 +195,7 @@ graph TB
 
 - **Efficient Metadata Updates**: Vector store payload updates (no vector re-indexing)
 - **Optimized LLM Models**: Reduced token usage for structured outputs
-- **Batch Operations**: Support for batch memory operations
+- **Simplified Retry Logic**: Inline retry with 2 attempts for critical update operations
 - **Access Tracking**: Atomic updates with minimal overhead
 
 ---

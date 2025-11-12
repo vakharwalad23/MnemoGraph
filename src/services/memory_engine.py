@@ -16,7 +16,6 @@ from src.config import Config
 from src.core.embeddings.base import Embedder
 from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
-from src.core.memory_store import MemorySyncManager
 from src.core.memory_store.memory_store import MemoryStore
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory, NodeType
@@ -30,7 +29,6 @@ from src.utils.exceptions import (
     GraphStoreError,
     MemoryError,
     NotFoundError,
-    SyncError,
     ValidationError,
     VectorStoreError,
 )
@@ -74,17 +72,9 @@ class MemoryEngine:
         self.embedder = embedder
         self.config = config
 
-        self.sync_manager = MemorySyncManager(
-            graph_store=graph_store,
-            vector_store=vector_store,
-            max_retries=3,
-            retry_delay=0.5,
-        )
-
         self.memory_store = MemoryStore(
             vector_store=vector_store,
             graph_store=graph_store,
-            sync_manager=self.sync_manager,
         )
 
         # Direct store references kept for infrastructure operations only (initialize, close, statistics)
@@ -191,7 +181,7 @@ class MemoryEngine:
             )
 
             return memory, extraction
-        except (GraphStoreError, VectorStoreError, SyncError) as e:
+        except (GraphStoreError, VectorStoreError) as e:
             logger.error(
                 f"Failed to add memory: {e}",
                 extra={"operation": "add_memory", "error": str(e), "error_type": type(e).__name__},
@@ -310,7 +300,7 @@ class MemoryEngine:
             return updated_memory, evolution
         except (NotFoundError, ValidationError):
             raise
-        except (GraphStoreError, VectorStoreError, SyncError) as e:
+        except (GraphStoreError, VectorStoreError) as e:
             logger.error(
                 f"Failed to update memory {memory_id}: {e}",
                 extra={"memory_id": memory_id, "error": str(e), "error_type": type(e).__name__},
@@ -366,7 +356,7 @@ class MemoryEngine:
 
         except (NotFoundError, ValidationError):
             raise
-        except (VectorStoreError, SyncError) as e:
+        except VectorStoreError as e:
             logger.error(
                 f"Failed to update metadata for {memory_id}: {e}",
                 extra={"memory_id": memory_id, "error": str(e), "error_type": type(e).__name__},

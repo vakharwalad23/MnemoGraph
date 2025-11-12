@@ -322,10 +322,10 @@ class TestMemoryEvolutionServiceNeo4j:
         assert original_memory is not None
         assert original_memory.status.value == "active"
 
-    async def test_preserve_action_with_sync_manager(
+    async def test_preserve_action_syncs_to_vector_store(
         self, mock_llm, mock_embedder, sample_memory, memory_store
     ):
-        """Test that preserve action syncs to vector store via sync manager."""
+        """Test that preserve action syncs to vector store."""
         from unittest.mock import AsyncMock, patch
 
         from src.services.memory_evolution import EvolutionAnalysis

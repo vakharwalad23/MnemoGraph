@@ -12,18 +12,17 @@ Key responsibilities:
 - Automatic synchronization between stores
 """
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
 from src.core.graph_store.base import GraphStore
-from src.core.memory_store.sync_manager import MemorySyncManager
 from src.core.vector_store.base import VectorStore
 from src.models.memory import Memory
 from src.models.relationships import Edge
 from src.utils.exceptions import (
     GraphStoreError,
     MemoryError,
-    SyncError,
     ValidationError,
     VectorStoreError,
 )
@@ -42,14 +41,12 @@ class MemoryStore:
     Architecture:
     - Vector store: Source of truth for all memory data and metadata
     - Graph store: Relationship management and graph queries
-    - Sync manager: Ensures consistency between stores
     """
 
     def __init__(
         self,
         vector_store: VectorStore,
         graph_store: GraphStore,
-        sync_manager: MemorySyncManager,
     ):
         """
         Initialize MemoryStore facade.
@@ -57,11 +54,9 @@ class MemoryStore:
         Args:
             vector_store: Vector database for semantic search
             graph_store: Graph database for relationships
-            sync_manager: Sync manager for consistency
         """
         self.vector_store = vector_store
         self.graph_store = graph_store
-        self.sync_manager = sync_manager
         logger.info("MemoryStore facade initialized")
 
     async def get_memory(
@@ -136,7 +131,6 @@ class MemoryStore:
             ValidationError: If memory is invalid
             VectorStoreError: If vector store operation fails
             GraphStoreError: If graph store operation fails
-            SyncError: If synchronization fails
         """
         if not memory.id or not memory.content:
             raise ValidationError("Memory must have id and content")
@@ -192,7 +186,6 @@ class MemoryStore:
         Raises:
             ValidationError: If memory is invalid
             VectorStoreError: If vector store operation fails
-            SyncError: If synchronization fails
         """
         if not memory.id:
             raise ValidationError("Memory must have id")
@@ -206,12 +199,50 @@ class MemoryStore:
             # Update timestamp
             memory.updated_at = datetime.now()
 
-            # Update in vector store (source of truth)
-            await self.sync_manager.sync_memory_full(memory)
-            logger.debug(
-                f"Memory updated in vector store: {memory.id}",
-                extra={"memory_id": memory.id},
-            )
+            # If embedding is missing, try to retrieve from vector store
+            if not memory.embedding or len(memory.embedding) == 0:
+                logger.debug(
+                    f"Embedding missing for {memory.id}, attempting to retrieve from vector store",
+                    extra={"memory_id": memory.id},
+                )
+                existing_memory = await self.vector_store.get_memory(memory.id)
+                if (
+                    existing_memory
+                    and existing_memory.embedding
+                    and len(existing_memory.embedding) > 0
+                ):
+                    memory.embedding = existing_memory.embedding
+                    logger.debug(
+                        f"Retrieved embedding for {memory.id} from vector store",
+                        extra={"memory_id": memory.id},
+                    )
+                else:
+                    raise ValidationError(
+                        f"Cannot update {memory.id}: no embedding found. "
+                        "Memory needs to be re-embedded with embedder.embed() before updating."
+                    )
+
+            # Update in vector store with simple retry (2 attempts)
+            max_retries = 2
+            retry_delay = 0.5
+
+            for attempt in range(max_retries):
+                try:
+                    await self.vector_store.upsert_memory(memory)
+                    logger.debug(
+                        f"Memory updated in vector store: {memory.id}",
+                        extra={"memory_id": memory.id},
+                    )
+                    break
+                except VectorStoreError as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            f"Update failed for {memory.id} (attempt {attempt + 1}/{max_retries}): {e}. Retrying...",
+                            extra={"memory_id": memory.id, "attempt": attempt + 1},
+                        )
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        raise
 
             # Sync minimal node to graph store
             await self.graph_store.update_node(memory)
@@ -226,8 +257,8 @@ class MemoryStore:
             )
             return memory
 
-        except (VectorStoreError, SyncError):
-            # Let store errors propagate
+        except (ValidationError, VectorStoreError):
+            # Let validation and store errors propagate
             raise
         except Exception as e:
             logger.error(
