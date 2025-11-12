@@ -29,7 +29,8 @@ class Embedder(ABC):
             List of floats representing the embedding vector
 
         Raises:
-            Exception: Provider-specific errors
+            ValidationError: If text is invalid
+            EmbeddingError: If embedding generation fails
         """
         pass
 
@@ -73,7 +74,7 @@ class Embedder(ABC):
     async def close(self):
         """
         Close any open connections.
+
         Optional to override if provider needs cleanup.
         """
-        # Default implementation does nothing
-        # Providers should override if cleanup is needed
+        pass

@@ -1,5 +1,5 @@
 """
-Neo4j graph store implementation - redesigned for Phase 2 & 3.
+Neo4j graph store implementation.
 
 Production-grade graph database for complex relationship queries and graph analytics.
 """
@@ -14,6 +14,10 @@ from neo4j import AsyncDriver, AsyncGraphDatabase
 from src.core.graph_store.base import GraphStore
 from src.models.memory import Memory, MemoryStatus, NodeType
 from src.models.relationships import Edge, RelationshipType
+from src.utils.exceptions import GraphStoreError, ValidationError
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class Neo4jGraphStore(GraphStore):
@@ -52,101 +56,179 @@ class Neo4jGraphStore(GraphStore):
         self.driver: AsyncDriver | None = None
 
     async def connect(self) -> None:
-        """Establish connection to Neo4j."""
+        """
+        Establish connection to Neo4j.
+
+        Raises:
+            GraphStoreError: If connection fails
+        """
         if self.driver is None:
-            self.driver = AsyncGraphDatabase.driver(
-                self.uri,
-                auth=(self.username, self.password),
-            )
+            try:
+                self.driver = AsyncGraphDatabase.driver(
+                    self.uri,
+                    auth=(self.username, self.password),
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to connect to Neo4j: {e}",
+                    extra={"uri": self.uri, "error": str(e)},
+                )
+                raise GraphStoreError(f"Failed to connect to Neo4j: {e}") from e
 
     async def initialize(self) -> None:
-        """Create indexes and constraints."""
-        await self.connect()
+        """
+        Create indexes and constraints.
 
-        async with self.driver.session(database=self.database) as session:
-            # Create constraint on Memory ID (unique)
-            await session.run(
-                "CREATE CONSTRAINT memory_id IF NOT EXISTS " "FOR (m:Memory) REQUIRE m.id IS UNIQUE"
+        Raises:
+            GraphStoreError: If initialization fails
+        """
+        try:
+            await self.connect()
+
+            async with self.driver.session(database=self.database) as session:
+                # Create constraint on Memory ID (unique)
+                await session.run(
+                    "CREATE CONSTRAINT memory_id IF NOT EXISTS "
+                    "FOR (m:Memory) REQUIRE m.id IS UNIQUE"
+                )
+
+                # Create indices for fast lookups
+                await session.run(
+                    "CREATE INDEX memory_status IF NOT EXISTS " "FOR (m:Memory) ON (m.status)"
+                )
+
+                await session.run(
+                    "CREATE INDEX memory_type IF NOT EXISTS " "FOR (m:Memory) ON (m.type)"
+                )
+
+                await session.run(
+                    "CREATE INDEX memory_created IF NOT EXISTS " "FOR (m:Memory) ON (m.created_at)"
+                )
+
+                await session.run(
+                    "CREATE INDEX memory_version IF NOT EXISTS " "FOR (m:Memory) ON (m.version)"
+                )
+        except Exception as e:
+            logger.error(
+                f"Failed to initialize Neo4j: {e}",
+                extra={"database": self.database, "error": str(e)},
             )
-
-            # Create indices for fast lookups
-            await session.run(
-                "CREATE INDEX memory_status IF NOT EXISTS " "FOR (m:Memory) ON (m.status)"
-            )
-
-            await session.run(
-                "CREATE INDEX memory_type IF NOT EXISTS " "FOR (m:Memory) ON (m.type)"
-            )
-
-            await session.run(
-                "CREATE INDEX memory_created IF NOT EXISTS " "FOR (m:Memory) ON (m.created_at)"
-            )
-
-            await session.run(
-                "CREATE INDEX memory_version IF NOT EXISTS " "FOR (m:Memory) ON (m.version)"
-            )
-
-    # NODE OPERATIONS
+            raise GraphStoreError(f"Failed to initialize Neo4j: {e}") from e
 
     async def add_node(self, memory: Memory) -> None:
-        """Add a memory node to the graph."""
-        await self.connect()
+        """
+        Add a minimal memory node to the graph.
 
-        async with self.driver.session(database=self.database) as session:
-            await session.run(
-                """
-                MERGE (m:Memory {id: $id})
-                SET m.content = $content,
-                    m.type = $type,
-                    m.version = $version,
-                    m.parent_version = $parent_version,
-                    m.valid_from = $valid_from,
-                    m.valid_until = $valid_until,
-                    m.status = $status,
-                    m.superseded_by = $superseded_by,
-                    m.invalidation_reason = $invalidation_reason,
-                    m.confidence = $confidence,
-                    m.access_count = $access_count,
-                    m.last_accessed = $last_accessed,
-                    m.created_at = $created_at,
-                    m.updated_at = $updated_at,
-                    m.metadata = $metadata
-                """,
-                {
-                    "id": memory.id,
-                    "content": memory.content,
-                    "type": memory.type.value,
-                    "version": memory.version,
-                    "parent_version": memory.parent_version,
-                    "valid_from": memory.valid_from.isoformat(),
-                    "valid_until": memory.valid_until.isoformat() if memory.valid_until else None,
-                    "status": memory.status.value,
-                    "superseded_by": memory.superseded_by,
-                    "invalidation_reason": memory.invalidation_reason,
-                    "confidence": memory.confidence,
-                    "access_count": memory.access_count,
-                    "last_accessed": (
-                        memory.last_accessed.isoformat() if memory.last_accessed else None
-                    ),
-                    "created_at": memory.created_at.isoformat(),
-                    "updated_at": memory.updated_at.isoformat(),
-                    "metadata": json.dumps(memory.metadata),
-                },
+        Graph store now stores minimal node information only.
+        Full memory data lives in vector store.
+
+        Minimal node contains:
+        - id: For identification
+        - content_preview: First 200 chars for display in graph queries
+        - type: NodeType for filtering
+        - status: MemoryStatus for filtering
+        - version: For version tracking queries
+        - parent_version: For version chain traversal
+        - superseded_by: For version chain traversal
+
+        Args:
+            memory: Memory object (only minimal fields extracted)
+
+        Raises:
+            ValidationError: If memory is invalid
+            GraphStoreError: If add operation fails
+        """
+        if not memory:
+            raise ValidationError("Memory cannot be None")
+        if not memory.id:
+            raise ValidationError("Memory ID cannot be empty")
+
+        try:
+            await self.connect()
+
+            # Extract content preview (first 200 chars)
+            content_preview = memory.content[:200] if memory.content else ""
+
+            async with self.driver.session(database=self.database) as session:
+                await session.run(
+                    """
+                    MERGE (m:Memory {id: $id})
+                    SET m.content_preview = $content_preview,
+                        m.type = $type,
+                        m.status = $status,
+                        m.version = $version,
+                        m.parent_version = $parent_version,
+                        m.superseded_by = $superseded_by
+                    """,
+                    {
+                        "id": memory.id,
+                        "content_preview": content_preview,
+                        "type": memory.type.value,
+                        "status": memory.status.value,
+                        "version": memory.version,
+                        "parent_version": memory.parent_version,
+                        "superseded_by": memory.superseded_by,
+                    },
+                )
+
+            logger.debug(
+                f"Added minimal node: {memory.id}",
+                extra={"memory_id": memory.id, "type": memory.type.value},
             )
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"Failed to add node {memory.id}: {e}",
+                extra={"memory_id": memory.id, "error": str(e)},
+            )
+            raise GraphStoreError(f"Failed to add node: {e}") from e
 
     async def get_node(self, node_id: str) -> Memory | None:
-        """Retrieve a memory node by ID."""
-        await self.connect()
+        """
+        Retrieve a minimal memory node by ID.
 
-        async with self.driver.session(database=self.database) as session:
-            result = await session.run("MATCH (m:Memory {id: $id}) RETURN m", {"id": node_id})
+        Note: This returns MINIMAL node data only (id, content_preview, type, status).
+        For full memory data, use MemoryStore.get_memory() which fetches from vector store.
 
-            record = await result.single()
-            if not record:
-                return None
+        This method is primarily used for:
+        - Graph traversal operations
+        - Relationship queries
+        - Version chain walking
 
-            node = record["m"]
-            return self._node_to_memory(node)
+        Args:
+            node_id: Node identifier
+
+        Returns:
+            Memory with minimal fields populated, None if not found
+
+        Raises:
+            ValidationError: If node_id is invalid
+            GraphStoreError: If retrieval operation fails
+        """
+        if not node_id or not node_id.strip():
+            raise ValidationError("Node ID cannot be empty")
+
+        try:
+            await self.connect()
+
+            async with self.driver.session(database=self.database) as session:
+                result = await session.run("MATCH (m:Memory {id: $id}) RETURN m", {"id": node_id})
+
+                record = await result.single()
+                if not record:
+                    return None
+
+                node = record["m"]
+                return self._node_to_memory(node)
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(
+                f"Failed to get node {node_id}: {e}",
+                extra={"node_id": node_id, "error": str(e)},
+            )
+            raise GraphStoreError(f"Failed to get node: {e}") from e
 
     async def update_node(self, memory: Memory) -> None:
         """Update an existing memory node."""
@@ -234,54 +316,98 @@ class Neo4jGraphStore(GraphStore):
 
             return memories
 
-    # EDGE OPERATIONS
-
     async def add_edge(self, edge: dict[str, Any] | Edge) -> str:
         """Add an edge between two nodes."""
         await self.connect()
 
-        # Handle both dict and Edge object
-        if isinstance(edge, Edge):
-            source_id = edge.source
-            target_id = edge.target
-            edge_type = edge.type.value if isinstance(edge.type, RelationshipType) else edge.type
-            confidence = edge.confidence
-            metadata = edge.metadata
-            created_at = edge.created_at.isoformat()
-        else:
-            source_id = edge["source"]
-            target_id = edge["target"]
-            edge_type = edge["type"]
-            confidence = edge.get("metadata", {}).get("confidence", 1.0)
-            metadata = edge.get("metadata", {})
-            created_at = datetime.now().isoformat()
+        try:
+            # Handle both dict and Edge object
+            if isinstance(edge, Edge):
+                source_id = edge.source
+                target_id = edge.target
+                edge_type = (
+                    edge.type.value if isinstance(edge.type, RelationshipType) else edge.type
+                )
+                confidence = edge.confidence
+                metadata = edge.metadata
+                created_at = edge.created_at.isoformat()
+            else:
+                source_id = edge["source"]
+                target_id = edge["target"]
+                edge_type_raw = edge["type"]
+                # Handle RelationshipType enum in dict case
+                if isinstance(edge_type_raw, RelationshipType):
+                    edge_type = edge_type_raw.value
+                elif isinstance(edge_type_raw, str):
+                    edge_type = edge_type_raw
+                else:
+                    edge_type = str(edge_type_raw)
+                confidence = edge.get("metadata", {}).get("confidence", 1.0)
+                metadata = edge.get("metadata", {})
+                created_at = datetime.now().isoformat()
 
-        edge_id = str(uuid4())
+            # Ensure edge_type is a string for the query
+            if not isinstance(edge_type, str):
+                edge_type = str(edge_type)
 
-        async with self.driver.session(database=self.database) as session:
-            # Use dynamic relationship type
-            await session.run(
-                f"""
-                MATCH (a:Memory {{id: $source_id}})
-                MATCH (b:Memory {{id: $target_id}})
-                CREATE (a)-[r:{edge_type.upper()} {{
-                    id: $edge_id,
-                    confidence: $confidence,
-                    created_at: $created_at,
-                    metadata: $metadata
-                }}]->(b)
-                """,
-                {
-                    "source_id": source_id,
-                    "target_id": target_id,
-                    "edge_id": edge_id,
-                    "confidence": confidence,
-                    "created_at": created_at,
-                    "metadata": json.dumps(metadata),
+            edge_id = str(uuid4())
+
+            async with self.driver.session(database=self.database) as session:
+                # Use dynamic relationship type
+                result = await session.run(
+                    f"""
+                    MATCH (a:Memory {{id: $source_id}})
+                    MATCH (b:Memory {{id: $target_id}})
+                    CREATE (a)-[r:{edge_type.upper()} {{
+                        id: $edge_id,
+                        confidence: $confidence,
+                        created_at: $created_at,
+                        metadata: $metadata
+                    }}]->(b)
+                    RETURN r
+                    """,
+                    {
+                        "source_id": source_id,
+                        "target_id": target_id,
+                        "edge_id": edge_id,
+                        "confidence": confidence,
+                        "created_at": created_at,
+                        "metadata": json.dumps(metadata),
+                    },
+                )
+
+                # Consume the result to ensure the query executed
+                record = await result.single()
+                if not record:
+                    raise GraphStoreError(
+                        f"Failed to create edge: {source_id} -> {target_id} ({edge_type})"
+                    )
+
+                logger.debug(
+                    f"Created edge: {source_id} -> {target_id} ({edge_type})",
+                    extra={
+                        "source_id": source_id,
+                        "target_id": target_id,
+                        "edge_type": edge_type,
+                        "edge_id": edge_id,
+                    },
+                )
+
+            return edge_id
+
+        except Exception as e:
+            logger.error(
+                f"Failed to add edge: {e}",
+                extra={
+                    "source_id": source_id if "source_id" in locals() else None,
+                    "target_id": target_id if "target_id" in locals() else None,
+                    "edge_type": edge_type if "edge_type" in locals() else None,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
                 },
+                exc_info=e,
             )
-
-        return edge_id
+            raise GraphStoreError(f"Failed to add edge: {e}") from e
 
     async def get_edge(self, edge_id: str) -> dict[str, Any] | None:
         """Get edge by ID."""
@@ -384,8 +510,6 @@ class Neo4jGraphStore(GraphStore):
 
         async with self.driver.session(database=self.database) as session:
             await session.run("MATCH ()-[r {id: $edge_id}]->() DELETE r", {"edge_id": edge_id})
-
-    # GRAPH TRAVERSAL
 
     async def get_neighbors(
         self,
@@ -526,27 +650,35 @@ class Neo4jGraphStore(GraphStore):
     # HELPER METHODS
 
     def _node_to_memory(self, node) -> Memory:
-        """Convert Neo4j node to Memory object."""
+        """
+        Convert Neo4j minimal node to Memory object.
+
+        Creates Memory with minimal fields from graph.
+        Full data should be fetched from vector store via MemoryStore.
+
+        Note: Some fields are set to defaults since they're not in graph store:
+        - content: Uses content_preview (truncated)
+        - embedding: Empty list (stored in vector store)
+        - metadata: Empty dict (stored in vector store)
+        - timestamps: Set to epoch/now (stored in vector store)
+        - access tracking: Defaults (stored in vector store)
+        """
         return Memory(
             id=node["id"],
-            content=node["content"],
+            content=node.get("content_preview", ""),  # Preview only
             type=NodeType(node["type"]),
-            embedding=[],  # Embeddings stored in vector store
+            embedding=[],  # Stored in vector store
             version=node.get("version", 1),
             parent_version=node.get("parent_version"),
-            valid_from=datetime.fromisoformat(node["valid_from"]),
-            valid_until=(
-                datetime.fromisoformat(node["valid_until"]) if node.get("valid_until") else None
-            ),
+            valid_from=datetime.now(),  # Not stored in graph
+            valid_until=None,
             status=MemoryStatus(node["status"]),
             superseded_by=node.get("superseded_by"),
-            invalidation_reason=node.get("invalidation_reason"),
-            confidence=node.get("confidence", 1.0),
-            access_count=node.get("access_count", 0),
-            last_accessed=(
-                datetime.fromisoformat(node["last_accessed"]) if node.get("last_accessed") else None
-            ),
-            created_at=datetime.fromisoformat(node["created_at"]),
-            updated_at=datetime.fromisoformat(node["updated_at"]),
-            metadata=json.loads(node.get("metadata", "{}")),
+            invalidation_reason=None,  # Not stored in graph
+            confidence=1.0,  # Not stored in graph
+            access_count=0,  # Stored in vector store
+            last_accessed=None,  # Stored in vector store
+            created_at=datetime.now(),  # Not stored in graph
+            updated_at=datetime.now(),  # Not stored in graph
+            metadata={},  # Stored in vector store
         )

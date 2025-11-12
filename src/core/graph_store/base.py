@@ -1,5 +1,5 @@
 """
-Base interface for graph storage - redesigned for Phase 2 & 3.
+Base interface for graph storage
 
 Clean interface that works with new Memory model and relationship system.
 """
@@ -16,10 +16,13 @@ class GraphStore(ABC):
 
     @abstractmethod
     async def initialize(self) -> None:
-        """Initialize the graph store (create tables/schema)."""
-        pass
+        """
+        Initialize the graph store (create tables/schema).
 
-    # NODE OPERATIONS (Memory nodes)
+        Raises:
+            GraphStoreError: If initialization fails
+        """
+        pass
 
     @abstractmethod
     async def add_node(self, memory: Memory) -> None:
@@ -28,6 +31,10 @@ class GraphStore(ABC):
 
         Args:
             memory: Memory object to store
+
+        Raises:
+            ValidationError: If memory is invalid
+            GraphStoreError: If add operation fails
         """
         pass
 
@@ -41,6 +48,10 @@ class GraphStore(ABC):
 
         Returns:
             Memory or None if not found
+
+        Raises:
+            ValidationError: If node_id is invalid
+            GraphStoreError: If retrieval operation fails
         """
         pass
 
@@ -61,6 +72,10 @@ class GraphStore(ABC):
 
         Args:
             node_id: Node identifier
+
+        Raises:
+            ValidationError: If node_id is invalid
+            GraphStoreError: If deletion operation fails
         """
         pass
 
@@ -99,8 +114,6 @@ class GraphStore(ABC):
             List of random memories
         """
         pass
-
-    # EDGE OPERATIONS (Relationships)
 
     @abstractmethod
     async def add_edge(self, edge: dict[str, Any] | Edge) -> str:
@@ -165,8 +178,6 @@ class GraphStore(ABC):
         """
         pass
 
-    # GRAPH TRAVERSAL
-
     @abstractmethod
     async def get_neighbors(
         self,
@@ -205,8 +216,6 @@ class GraphStore(ABC):
             List of node IDs forming the path, or None
         """
         pass
-
-    # UTILITY METHODS
 
     @abstractmethod
     async def count_nodes(self, filters: dict[str, Any] | None = None) -> int:

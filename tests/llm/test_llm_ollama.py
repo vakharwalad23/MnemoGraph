@@ -8,6 +8,7 @@ import pytest
 from pydantic import BaseModel
 
 from src.core.llm.ollama import OllamaLLM
+from src.utils.exceptions import LLMError, ValidationError
 
 
 class SimpleResponse(BaseModel):
@@ -115,7 +116,7 @@ class TestOllamaLLM:
         with patch.object(ollama_llm.client, "chat", new_callable=AsyncMock) as mock_chat:
             mock_chat.return_value = {"message": {"content": "not json at all"}}
 
-            with pytest.raises(ValueError, match="Failed to parse structured output"):
+            with pytest.raises(ValidationError, match="Failed to parse structured output"):
                 await ollama_llm.complete("test", response_format=SimpleResponse)
 
     async def test_complete_structured_missing_fields(self, ollama_llm):
@@ -125,7 +126,7 @@ class TestOllamaLLM:
         with patch.object(ollama_llm.client, "chat", new_callable=AsyncMock) as mock_chat:
             mock_chat.return_value = {"message": {"content": json_response}}
 
-            with pytest.raises(ValueError):
+            with pytest.raises(LLMError):
                 await ollama_llm.complete("test", response_format=SimpleResponse)
 
     async def test_extract_json_clean(self, ollama_llm):

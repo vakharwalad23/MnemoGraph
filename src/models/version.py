@@ -60,27 +60,16 @@ class VersionChain(BaseModel):
 
 
 class InvalidationResult(BaseModel):
-    """Result of memory invalidation check."""
+    """
+    Result of memory invalidation check (LLM structured output).
+
+    Note: This is the minimal model for LLM output. Tracking fields like checked_at
+    should be added after LLM call if needed.
+    """
 
     model_config = {"extra": "ignore"}
 
-    memory_id: str = Field(..., description="REQUIRED: The ID of the memory being checked")
-    status: InvalidationStatus = Field(
-        ...,
-        description="REQUIRED: The determined status for this memory",
-    )
-    reasoning: str = Field(
-        ...,
-        description="REQUIRED: Clear explanation of why this status was assigned. Include specific reasons and evidence.",
-    )
-    confidence: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="REQUIRED: Confidence score between 0.0 and 1.0. Higher values mean more certain about the invalidation decision.",
-    )
-    preserve_as: str | None = Field(
-        default=None,
-        description="OPTIONAL: If memory should be preserved, specify the category (e.g., 'historical_context', 'reference_data')",
-    )
-    checked_at: datetime = Field(default_factory=datetime.now)
+    memory_id: str = Field(..., description="Memory ID being checked")
+    status: InvalidationStatus = Field(..., description="Determined status")
+    reasoning: str = Field(..., description="Why this status was assigned with specific evidence")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence (0-1) in this decision")

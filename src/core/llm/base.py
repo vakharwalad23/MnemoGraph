@@ -41,8 +41,8 @@ class LLMProvider(ABC):
             Pydantic model instance if response_format provided, else string
 
         Raises:
-            ValueError: If structured output parsing fails
-            Exception: Provider-specific errors
+            LLMError: If LLM operation fails
+            ValidationError: If structured output parsing fails
         """
         pass
 
@@ -50,7 +50,7 @@ class LLMProvider(ABC):
     async def close(self):
         """
         Close any open connections.
+
         Optional to override if provider needs cleanup.
         """
-        # Default implementation does nothing
-        # Providers should override if cleanup is needed
+        pass

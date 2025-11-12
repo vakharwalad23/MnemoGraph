@@ -8,9 +8,8 @@ import time
 
 from src.config import Config
 from src.core.embeddings.base import Embedder
-from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
-from src.core.vector_store.base import VectorStore
+from src.core.memory_store import MemoryStore
 from src.models.memory import Memory, NodeType
 from src.models.relationships import (
     ContextBundle,
@@ -18,10 +17,10 @@ from src.models.relationships import (
     Edge,
     Relationship,
     RelationshipBundle,
+    RelationshipType,
 )
 from src.services.context_filter import MultiStageFilter
 from src.services.invalidation_manager import InvalidationManager
-from src.services.memory_sync import MemorySyncManager
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -42,10 +41,8 @@ class LLMRelationshipEngine:
         self,
         llm_provider: LLMProvider,
         embedder: Embedder,
-        vector_store: VectorStore,
-        graph_store: GraphStore,
+        memory_store: MemoryStore,
         config: Config,
-        sync_manager: MemorySyncManager,
     ):
         """
         Initialize LLM relationship engine.
@@ -53,22 +50,17 @@ class LLMRelationshipEngine:
         Args:
             llm_provider: LLM for relationship extraction
             embedder: Embedder for generating embeddings
-            vector_store: Vector database
-            graph_store: Graph database
+            memory_store: MemoryStore facade for unified memory operations
             config: Configuration object
         """
         self.llm = llm_provider
         self.embedder = embedder
-        self.vector_store = vector_store
-        self.graph_store = graph_store
+        self.memory_store = memory_store
         self.config = config
 
-        # Initialize sub-systems
-        self.filter = MultiStageFilter(vector_store, graph_store, llm_provider, config)
+        self.filter = MultiStageFilter(memory_store, llm_provider, config)
 
-        self.invalidation = InvalidationManager(
-            llm_provider, graph_store, vector_store, sync_manager
-        )
+        self.invalidation = InvalidationManager(llm_provider, memory_store)
 
     async def process_new_memory(self, memory: Memory) -> RelationshipBundle:
         """
@@ -88,43 +80,30 @@ class LLMRelationshipEngine:
         """
         start_time = time.time()
 
-        # Step 1: Gather context (multi-stage filtering)
         logger.info(f"Gathering context for memory: {memory.id[:8]}")
         context = await self.filter.gather_context(memory)
 
-        # Step 2: Build comprehensive extraction prompt
         prompt = self._build_extraction_prompt(memory, context)
 
-        # Step 3: Parallel operations
-        # - LLM extraction
-        # - Vector store upsert
-        # - Graph node creation
         logger.debug("Extracting relationships with LLM")
 
         extraction_task = self.llm.complete(
             prompt, response_format=RelationshipBundle, max_tokens=2000, temperature=0.0
         )
 
-        upsert_task = self.vector_store.upsert_memory(memory)
-
-        node_task = self.graph_store.add_node(memory)
+        memory_creation_task = self.memory_store.create_memory(memory)
 
         results = await asyncio.gather(
-            extraction_task, upsert_task, node_task, return_exceptions=True
+            extraction_task, memory_creation_task, return_exceptions=True
         )
 
         extraction = results[0] if not isinstance(results[0], Exception) else None
 
         if not extraction:
-            logger.error("LLM extraction failed")
-            return RelationshipBundle(
-                memory_id=memory.id,
-                relationships=[],
-                derived_insights=[],
-                extraction_time_ms=(time.time() - start_time) * 1000,
-            )
+            extraction_time = (time.time() - start_time) * 1000
+            logger.error(f"LLM extraction failed (took {extraction_time:.0f}ms)")
+            return RelationshipBundle(memory_id=memory.id, relationships=[], derived_insights=[])
 
-        # Step 4: Create edges in parallel
         logger.debug(f"Creating {len(extraction.relationships)} relationship edges")
         edge_tasks = []
 
@@ -135,18 +114,27 @@ class LLMRelationshipEngine:
         for rel in extraction.relationships:
             if rel.confidence >= min_confidence:
                 edge = self._create_edge_from_relationship(memory.id, rel)
-                edge_tasks.append(self.graph_store.add_edge(edge))
+                edge_tasks.append(self.memory_store.add_relationship(edge))
 
         if edge_tasks:
-            await asyncio.gather(*edge_tasks, return_exceptions=True)
+            results = await asyncio.gather(*edge_tasks, return_exceptions=True)
+            # Log any errors that occurred during edge creation
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(
+                        f"Failed to create edge {i+1}/{len(edge_tasks)}: {result}",
+                        extra={
+                            "memory_id": memory.id,
+                            "error": str(result),
+                            "error_type": type(result).__name__,
+                        },
+                        exc_info=result,
+                    )
 
-        # Step 5: Handle derived memories
         if extraction.derived_insights:
             logger.debug(f"Creating {len(extraction.derived_insights)} derived memories")
             await self._create_derived_memories(extraction.derived_insights, memory)
 
-        # Step 6: Event-driven invalidation check
-        # Check if this new memory supersedes any existing ones
         if context.vector_candidates:
             logger.debug("Checking for supersession")
             superseded = await self.invalidation.check_supersession(
@@ -156,8 +144,6 @@ class LLMRelationshipEngine:
                 logger.info(f"Superseded {len(superseded)} existing memories")
 
         extraction_time = (time.time() - start_time) * 1000
-        extraction.extraction_time_ms = extraction_time
-
         logger.info(f"Extraction complete in {extraction_time:.0f}ms")
 
         return extraction
@@ -334,24 +320,25 @@ Begin extraction:
 
     def _create_edge_from_relationship(self, source_id: str, rel: Relationship) -> Edge:
         """
-        Create edge dict from relationship.
+        Create Edge object from relationship.
 
         Args:
             source_id: Source memory ID
             rel: Relationship data
 
         Returns:
-            Edge dictionary
+            Edge object
         """
-        return {
-            "source": source_id,
-            "target": rel.target_id,
-            "type": rel.type,
-            "metadata": {
+        return Edge(
+            source=source_id,
+            target=rel.target_id,
+            type=rel.type,
+            confidence=rel.confidence,
+            metadata={
                 "confidence": rel.confidence,
                 "reasoning": rel.reasoning,
             },
-        }
+        )
 
     async def _create_derived_memories(self, insights: list[DerivedInsight], source_memory: Memory):
         """
@@ -372,13 +359,10 @@ Begin extraction:
                 continue
 
             try:
-                # Generate unique ID
                 derived_id = f"derived_{source_memory.id}_{hash(insight.content) % 10000}"
 
-                # Generate embedding
                 embedding = await self.embedder.embed(insight.content)
 
-                # Create derived memory
                 derived = Memory(
                     id=derived_id,
                     content=insight.content,
@@ -394,19 +378,17 @@ Begin extraction:
                     confidence=insight.confidence,
                 )
 
-                # Add to stores
-                await self.graph_store.add_node(derived)
-                await self.vector_store.upsert_memory(derived)
+                await self.memory_store.create_memory(derived)
 
-                # Create DERIVED_FROM edges
                 for source_id in insight.source_ids:
-                    await self.graph_store.add_edge(
-                        {
-                            "source": derived.id,
-                            "target": source_id,
-                            "type": "DERIVED_FROM",
-                            "metadata": {"confidence": insight.confidence},
-                        }
+                    await self.memory_store.add_relationship(
+                        Edge(
+                            source=derived.id,
+                            target=source_id,
+                            type=RelationshipType.DERIVED_FROM,
+                            confidence=insight.confidence,
+                            metadata={"confidence": insight.confidence},
+                        )
                     )
 
                 logger.debug(f"Created derived memory: {derived_id[:8]}")

@@ -38,7 +38,6 @@ class AddMemoryResponse(BaseModel):
     content: str
     relationships_created: int
     derived_insights_created: int
-    extraction_time_ms: float
 
 
 class QueryMemoriesRequest(BaseModel):
@@ -245,7 +244,6 @@ async def add_memory(request: AddMemoryRequest):
             content=memory.content,
             relationships_created=len(extraction.relationships),
             derived_insights_created=len(extraction.derived_insights),
-            extraction_time_ms=extraction.extraction_time_ms,
         )
     except Exception as e:
         logger.error(f"Error adding memory: {e}")
@@ -324,10 +322,21 @@ async def get_memory(memory_id: str, include_relationships: bool = Query(default
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        memory = await engine.get_memory(memory_id, validate=True)
+        # Get memory with relationships if requested (single call, no double tracking)
+        memory = await engine.get_memory(
+            memory_id,
+            validate=True,
+            include_relationships=include_relationships,
+            relationship_limit=20,
+        )
 
         if not memory:
             raise HTTPException(status_code=404, detail="Memory not found")
+
+        # Extract relationships from metadata if included (before creating result)
+        relationships_data = None
+        if include_relationships and "_relationships" in memory.metadata:
+            relationships_data = memory.metadata.pop("_relationships")
 
         result = {
             "id": memory.id,
@@ -340,21 +349,21 @@ async def get_memory(memory_id: str, include_relationships: bool = Query(default
             "last_accessed": memory.last_accessed.isoformat() if memory.last_accessed else None,
             "access_count": memory.access_count,
             "confidence": memory.confidence,
-            "metadata": memory.metadata,
+            "metadata": memory.metadata,  # Metadata no longer contains _relationships
         }
 
-        if include_relationships:
-            neighbors = await engine.get_neighbors(memory_id, limit=20)
+        # Add relationships to result if included
+        if relationships_data:
             result["relationships"] = {
-                "count": len(neighbors),
+                "count": relationships_data["count"],
                 "edges": [
                     {
-                        "target_id": edge.target,
-                        "type": edge.type.value,
-                        "confidence": edge.confidence,
-                        "reasoning": edge.metadata.get("reasoning", ""),
+                        "target_id": edge["target_id"],
+                        "type": edge["type"],
+                        "confidence": edge["confidence"],
+                        "reasoning": edge["metadata"].get("reasoning", ""),
                     }
-                    for _, edge in neighbors
+                    for edge in relationships_data["edges"]
                 ],
             }
 

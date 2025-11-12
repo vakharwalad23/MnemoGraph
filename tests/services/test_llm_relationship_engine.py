@@ -20,45 +20,36 @@ class TestLLMRelationshipEngineUnit:
         self,
         mock_llm,
         mock_embedder,
-        mock_vector_store,
-        neo4j_graph_store,
         config,
-        mock_sync_manager,
+        memory_store,
     ):
         """Test engine initialization."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             config=config,
-            sync_manager=mock_sync_manager,
         )
 
         assert engine.llm == mock_llm
         assert engine.embedder == mock_embedder
-        assert engine.vector_store == mock_vector_store
-        assert engine.graph_store == neo4j_graph_store
+        assert engine.memory_store == memory_store
         assert engine.config == config
 
     async def test_format_memories_detailed(
         self,
         mock_llm,
         mock_embedder,
-        mock_vector_store,
-        neo4j_graph_store,
         config,
         sample_memories,
-        mock_sync_manager,
+        memory_store,
     ):
         """Test detailed memory formatting."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             config=config,
-            sync_manager=mock_sync_manager,
         )
 
         formatted = engine._format_memories_detailed(sample_memories[:3])
@@ -77,16 +68,14 @@ class TestLLMRelationshipEngineUnit:
         neo4j_graph_store,
         config,
         sample_memories,
-        mock_sync_manager,
+        memory_store,
     ):
         """Test compact memory formatting."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             config=config,
-            sync_manager=mock_sync_manager,
         )
 
         formatted = engine._format_memories_compact(sample_memories[:3])
@@ -101,19 +90,15 @@ class TestLLMRelationshipEngineUnit:
         self,
         mock_llm,
         mock_embedder,
-        mock_vector_store,
-        neo4j_graph_store,
         config,
-        mock_sync_manager,
+        memory_store,
     ):
         """Test formatting empty memory list."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             config=config,
-            sync_manager=mock_sync_manager,
         )
 
         formatted = engine._format_memories_detailed([])
@@ -125,22 +110,18 @@ class TestLLMRelationshipEngineUnit:
         self,
         mock_llm,
         mock_embedder,
-        mock_vector_store,
-        neo4j_graph_store,
         config,
-        mock_sync_manager,
+        memory_store,
     ):
         """Test creating edge from relationship."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             config=config,
-            sync_manager=mock_sync_manager,
         )
 
-        from src.models.relationships import Relationship
+        from src.models.relationships import Edge, Relationship
 
         rel = Relationship(
             type=RelationshipType.SIMILAR_TO,
@@ -151,11 +132,14 @@ class TestLLMRelationshipEngineUnit:
 
         edge = engine._create_edge_from_relationship("mem_source", rel)
 
-        assert edge["source"] == "mem_source"
-        assert edge["target"] == "mem_target"
-        assert edge["type"] == RelationshipType.SIMILAR_TO
-        assert edge["metadata"]["confidence"] == 0.85
-        assert edge["metadata"]["reasoning"] == "Similar content"
+        # Verify it returns an Edge object
+        assert isinstance(edge, Edge)
+        assert edge.source == "mem_source"
+        assert edge.target == "mem_target"
+        assert edge.type == RelationshipType.SIMILAR_TO
+        assert edge.confidence == 0.85
+        assert edge.metadata["confidence"] == 0.85
+        assert edge.metadata["reasoning"] == "Similar content"
 
 
 @pytest.mark.integration
@@ -172,16 +156,14 @@ class TestLLMRelationshipEngineNeo4j:
         neo4j_graph_store,
         config,
         sample_memory,
-        mock_sync_manager,
+        memory_store,
     ):
         """Test processing new memory with Neo4j."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             config=config,
-            sync_manager=mock_sync_manager,
         )
 
         # Process memory
@@ -199,26 +181,22 @@ class TestLLMRelationshipEngineNeo4j:
         self,
         mock_llm,
         mock_embedder,
-        mock_vector_store,
-        neo4j_graph_store,
         config,
         sample_memories,
-        mock_sync_manager,
+        memory_store,
     ):
         """Test that edges are created in Neo4j."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             config=config,
-            sync_manager=mock_sync_manager,
         )
 
         # Add context memories
         for mem in sample_memories[:-1]:
-            await neo4j_graph_store.add_node(mem)
-            await mock_vector_store.upsert_memory(mem)
+            await memory_store.graph_store.add_node(mem)
+            await memory_store.vector_store.upsert_memory(mem)
 
         # Process new memory
         new_memory = sample_memories[-1]
@@ -227,30 +205,26 @@ class TestLLMRelationshipEngineNeo4j:
         assert result is not None
 
         # Check edges were created
-        edge_count = await neo4j_graph_store.count_edges()
+        edge_count = await memory_store.graph_store.count_edges()
         assert edge_count >= 0
 
     async def test_create_derived_memories_neo4j(
         self,
         mock_llm,
         mock_embedder,
-        mock_vector_store,
-        neo4j_graph_store,
         config,
         sample_memory,
-        mock_sync_manager,
+        memory_store,
     ):
         """Test creating derived memories in Neo4j."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             config=config,
-            sync_manager=mock_sync_manager,
         )
 
-        await neo4j_graph_store.add_node(sample_memory)
+        await memory_store.graph_store.add_node(sample_memory)
 
         from src.models.relationships import DerivedInsight
 
@@ -267,7 +241,7 @@ class TestLLMRelationshipEngineNeo4j:
         await engine._create_derived_memories(insights, sample_memory)
 
         # Verify derived memory exists
-        count = await neo4j_graph_store.count_nodes({"type": NodeType.DERIVED.value})
+        count = await memory_store.graph_store.count_nodes({"type": NodeType.DERIVED.value})
         assert count > 0
 
 
@@ -284,16 +258,14 @@ class TestBuildExtractionPrompt:
         neo4j_graph_store,
         config,
         sample_memory,
-        mock_sync_manager,
+        memory_store,
     ):
         """Test extraction prompt building."""
         engine = LLMRelationshipEngine(
             llm_provider=mock_llm,
             embedder=mock_embedder,
-            vector_store=mock_vector_store,
-            graph_store=neo4j_graph_store,
+            memory_store=memory_store,
             config=config,
-            sync_manager=mock_sync_manager,
         )
 
         from src.models.relationships import ContextBundle

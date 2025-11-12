@@ -12,9 +12,8 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 
 from src.config import Config
-from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
-from src.core.vector_store.base import VectorStore
+from src.core.memory_store import MemoryStore
 from src.models.memory import Memory
 from src.models.relationships import ContextBundle
 from src.utils.logger import get_logger
@@ -23,32 +22,27 @@ logger = get_logger(__name__)
 
 
 class RelevanceScore(BaseModel):
-    """Relevance score from LLM pre-filter."""
+    """Relevance score from LLM pre-filter (structured output)."""
 
     model_config = {"extra": "ignore"}
 
-    id: str = Field(..., description="REQUIRED: The ID of the memory being scored")
+    id: str = Field(..., description="Memory ID being scored")
     relevance: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="REQUIRED: Relevance score between 0.0 and 1.0. Use 1.0 for highly relevant, 0.7-0.9 for relevant, 0.4-0.7 for somewhat relevant, <0.4 for not relevant",
+        description="Relevance (0-1): 1.0=high, 0.7-0.9=relevant, 0.4-0.7=some, <0.4=not",
     )
-    reason: str = Field(
-        ...,
-        description="REQUIRED: Brief explanation of why this relevance score was assigned. Mention specific aspects that make it relevant or not.",
-    )
+    reason: str = Field(..., description="Brief why this score with specific aspects")
 
 
 class EntityList(BaseModel):
-    """List of entities extracted from text."""
+    """List of entities extracted from text (structured output)."""
 
     model_config = {"extra": "ignore"}
 
     entities: list[str] = Field(
-        ...,
-        description="REQUIRED: List of key entities (people, places, organizations, concepts) extracted from the text. Maximum 5 entities.",
-        max_length=5,
+        ..., description="Key entities (people, places, orgs, concepts), max 5", max_length=5
     )
 
 
@@ -62,8 +56,7 @@ class MultiStageFilter:
 
     def __init__(
         self,
-        vector_store: VectorStore,
-        graph_store: GraphStore,
+        memory_store: MemoryStore,
         llm_provider: LLMProvider,
         config: Config,
     ):
@@ -71,13 +64,11 @@ class MultiStageFilter:
         Initialize multi-stage filter.
 
         Args:
-            vector_store: Vector database
-            graph_store: Graph database
+            memory_store: Unified memory store facade
             llm_provider: LLM for pre-filtering
             config: Configuration object
         """
-        self.vector_store = vector_store
-        self.graph_store = graph_store
+        self.memory_store = memory_store
         self.llm = llm_provider
         self.config = config
 
@@ -91,27 +82,17 @@ class MultiStageFilter:
         Returns:
             Complete context bundle
         """
-        # STAGE 1: Vector Search (Fast Pre-filtering)
-        # Goal: 1M+ memories → ~100 candidates in 10-50ms
-
         start = time.time()
         vector_candidates = await self._stage1_vector_search(new_memory)
         stage1_time = (time.time() - start) * 1000
-
-        # STAGE 2: Multi-Dimensional Context Gathering (Parallel)
-        # Goal: Gather context from multiple dimensions
 
         start = time.time()
         context_results = await self._stage2_hybrid_filtering(new_memory)
         stage2_time = (time.time() - start) * 1000
 
-        # STAGE 3: LLM Pre-filtering (Smart Filter)
-        # Goal: 50 candidates → 15-20 highly relevant
-
         start = time.time()
         combined_candidates = self._combine_and_deduplicate(vector_candidates, context_results)
 
-        # Get context window from config (default 50)
         context_window = getattr(
             getattr(self.config, "llm_relationships", None), "context_window", 50
         )
@@ -125,7 +106,6 @@ class MultiStageFilter:
 
         stage3_time = (time.time() - start) * 1000
 
-        # Log performance
         logger.info(
             f"Context gathering: Stage1={stage1_time:.1f}ms ({len(vector_candidates)} candidates), "
             f"Stage2={stage2_time:.1f}ms ({len(combined_candidates)} total), "
@@ -134,7 +114,7 @@ class MultiStageFilter:
         )
 
         return ContextBundle(
-            vector_candidates=vector_candidates[:10],  # Top 10 for context
+            vector_candidates=vector_candidates[:10],
             temporal_context=context_results["temporal"],
             graph_context=context_results["graph"],
             entity_context=context_results["entity"],
@@ -154,19 +134,18 @@ class MultiStageFilter:
             List of candidate memories
         """
         try:
-            results = await self.vector_store.search_similar(
-                vector=memory.embedding,
+            results = await self.memory_store.search_similar(
+                query_embedding=memory.embedding,
                 limit=100,
                 filters={
-                    # Only search active/historical memories
                     "status": ["active", "historical"],
-                    # Optional: Time window for temporal relevance
                     "created_after": (datetime.now() - timedelta(days=90)).isoformat(),
                 },
-                score_threshold=0.3,  # Cosine similarity > 0.3
+                track_access=False,
+                score_threshold=0.3,
             )
 
-            return [r.memory for r in results] if results else []
+            return [r[0] for r in results] if results else []
 
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
@@ -215,19 +194,18 @@ class MultiStageFilter:
         try:
             cutoff = datetime.now() - timedelta(days=window_days)
 
-            # Use vector search with temporal filter
-            # This gets "recent memories about the same topic"
-            results = await self.vector_store.search_similar(
-                vector=memory.embedding,
+            results = await self.memory_store.search_similar(
+                query_embedding=memory.embedding,
                 limit=20,
                 filters={
                     "status": ["active"],
-                    "created_after": cutoff.isoformat(),  # Last 30 days
+                    "created_after": cutoff.isoformat(),
                 },
-                score_threshold=0.4,  # Similarity > 0.4 (configurable)
+                track_access=False,
+                score_threshold=0.4,
             )
 
-            return [r.memory for r in results] if results else []
+            return [r[0] for r in results] if results else []
 
         except Exception:
             return []
@@ -244,8 +222,8 @@ class MultiStageFilter:
             List of neighboring memories
         """
         try:
-            neighbors = await self.graph_store.get_neighbors(
-                memory.id,
+            neighbors = await self.memory_store.get_neighbors(
+                memory_id=memory.id,
                 depth=depth,
                 relationship_types=[
                     "SIMILAR_TO",
@@ -257,10 +235,9 @@ class MultiStageFilter:
                 limit=15,
             )
 
-            return [n["node"] for n in neighbors if "node" in n]
+            return [n[0] for n in neighbors] if neighbors else []
 
         except Exception:
-            # Node might not exist yet (being created)
             return []
 
     async def _entity_filter(self, memory: Memory) -> list[Memory]:
@@ -275,7 +252,6 @@ class MultiStageFilter:
             List of memories with shared entities
         """
         try:
-            # Use LLM to extract entities from the memory
             entity_prompt = f"""
 Extract key entities from this text. Identify important people, places, organizations, concepts, or technical terms.
 
@@ -291,11 +267,10 @@ Return a JSON object with a list of up to 5 key entities.
             if not result.entities:
                 return []
 
-            # Find memories with these entities
             candidates = []
-            for entity in result.entities[:5]:  # Top 5 entities
+            for entity in result.entities[:5]:
                 try:
-                    related = await self.vector_store.search_by_payload(
+                    related = await self.memory_store.vector_store.search_by_payload(
                         filter={"entities": {"$contains": entity}}, limit=5
                     )
                     candidates.extend([r.memory for r in related])
@@ -323,7 +298,7 @@ Return a JSON object with a list of up to 5 key entities.
         try:
             conversation_id = memory.metadata["conversation_id"]
 
-            results = await self.graph_store.query_memories(
+            results = await self.memory_store.graph_store.query_memories(
                 filters={"metadata.conversation_id": conversation_id},
                 order_by="created_at DESC",
                 limit=10,
@@ -378,7 +353,6 @@ Return JSON array of top {target} most relevant:
 """
 
         try:
-            # Use LLM for pre-filtering
             scores = await self.llm.complete(
                 prompt,
                 response_format=list[RelevanceScore],
@@ -386,7 +360,6 @@ Return JSON array of top {target} most relevant:
                 temperature=0.0,
             )
 
-            # Sort and return top candidates
             sorted_scores = sorted(scores, key=lambda x: x.relevance, reverse=True)
 
             top_ids = {s.id for s in sorted_scores[:target]}
@@ -412,14 +385,29 @@ Return JSON array of top {target} most relevant:
         """
         all_candidates = []
 
-        # Add vector candidates (highest priority)
-        all_candidates.extend(vector_candidates[:50])
+        # Extract Memory objects from vector_candidates (should already be Memory objects)
+        for candidate in vector_candidates[:50]:
+            if isinstance(candidate, tuple):
+                # Handle tuple (Memory, score) if somehow passed
+                all_candidates.append(candidate[0])
+            elif hasattr(candidate, "id"):
+                all_candidates.append(candidate)
+            else:
+                logger.warning(f"Unexpected candidate type: {type(candidate)}")
+                continue
 
-        # Add context candidates
+        # Extract Memory objects from context_results
         for _context_type, memories in context_results.items():
-            all_candidates.extend(memories)
+            for memory in memories:
+                if isinstance(memory, tuple):
+                    # Handle tuple (Memory, score) or (Memory, Edge) if somehow passed
+                    all_candidates.append(memory[0])
+                elif hasattr(memory, "id"):
+                    all_candidates.append(memory)
+                else:
+                    logger.warning(f"Unexpected memory type in {_context_type}: {type(memory)}")
+                    continue
 
-        # Deduplicate by ID
         seen = set()
         unique_candidates = []
 

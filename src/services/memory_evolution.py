@@ -13,36 +13,25 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from src.core.embeddings.base import Embedder
-from src.core.graph_store.base import GraphStore
 from src.core.llm.base import LLMProvider
-from src.core.vector_store.base import VectorStore
+from src.core.memory_store import MemoryStore
 from src.models.memory import Memory, MemoryStatus
 from src.models.version import MemoryEvolution, VersionChain, VersionChange
-from src.services.memory_sync import MemorySyncManager
 
 
 class EvolutionAnalysis(BaseModel):
-    """LLM analysis of how to evolve a memory."""
+    """LLM analysis of how to evolve a memory (structured output)."""
 
-    model_config = {"extra": "ignore"}  # Ignore extra fields from LLM
+    model_config = {"extra": "ignore"}
 
-    action: str = Field(
-        ...,
-        description="REQUIRED: The action to take. Must be exactly one of: 'update', 'augment', 'replace', or 'preserve'",
-    )
-    reasoning: str = Field(
-        ...,
-        description="REQUIRED: Detailed explanation of why this action is appropriate. Include specific details about what changed and why.",
-    )
-    change_description: str = Field(
-        ...,
-        description="REQUIRED: Brief description of what changed (1-2 sentences). Example: 'Updated location from Paris to London' or 'Added new skill: Python programming'",
-    )
+    action: str = Field(..., description="Action: update, augment, replace, or preserve")
+    reasoning: str = Field(..., description="Why this action with specific details")
+    change_description: str = Field(..., description="Brief what changed (1-2 sentences)")
     confidence: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="REQUIRED: Confidence score between 0.0 and 1.0. Use 1.0 for certain changes, 0.5-0.8 for probable changes, <0.5 for uncertain changes.",
+        description="Confidence (0-1): 1.0=certain, 0.5-0.8=probable, <0.5=uncertain",
     )
 
 
@@ -60,26 +49,20 @@ class MemoryEvolutionService:
     def __init__(
         self,
         llm: LLMProvider,
-        graph_store: GraphStore,
+        memory_store: MemoryStore,
         embedder: Embedder,
-        vector_store: VectorStore | None = None,
-        sync_manager: MemorySyncManager | None = None,
     ):
         """
         Initialize memory evolution service.
 
         Args:
             llm: LLM provider for evolution analysis
-            graph_store: Graph database for storing memory nodes
+            memory_store: MemoryStore facade for unified memory operations
             embedder: Embedder for generating embeddings
-            vector_store: Optional vector store for semantic search in time travel queries
-            sync_manager: Optional sync manager for atomic updates
         """
         self.llm = llm
-        self.graph_store = graph_store
+        self.memory_store = memory_store
         self.embedder = embedder
-        self.vector_store = vector_store
-        self.sync_manager = sync_manager
 
     async def evolve_memory(self, current: Memory, new_info: str) -> MemoryEvolution:
         """
@@ -102,25 +85,17 @@ class MemoryEvolutionService:
         analysis = await self._analyze_evolution(current, new_info)
 
         if analysis.action in ["update", "replace"]:
-            # Create new version
             new_version = await self._create_new_version(current, new_info, analysis)
 
-            # Mark current as superseded
             current.status = MemoryStatus.SUPERSEDED
             current.valid_until = datetime.now()
             current.superseded_by = new_version.id
             current.invalidation_reason = f"Superseded: {analysis.change_description}"
             current.updated_at = datetime.now()
 
-            # Save both versions - graph store first
-            await self.graph_store.update_node(current)
-            await self.graph_store.add_node(new_version)
-
-            # Sync supersession to vector store if sync manager available
-            if self.sync_manager:
-                await self.sync_manager.sync_memory_supersession(current)
-                # Sync new version as well
-                await self.sync_manager.sync_memory_full(new_version)
+            # Update via MemoryStore (handles both stores)
+            await self.memory_store.update_memory(current)
+            await self.memory_store.create_memory(new_version)
 
             return MemoryEvolution(
                 current_version=current.id,
@@ -130,26 +105,21 @@ class MemoryEvolutionService:
                     change_type=analysis.action,
                     reasoning=analysis.reasoning,
                     description=analysis.change_description,
-                    changed_fields=["content"],  # Track what changed
+                    changed_fields=["content"],
                 ),
             )
 
         elif analysis.action == "augment":
-            # Add to existing memory without versioning
             current.content = f"{current.content}\n\nUpdate: {new_info}"
 
-            # Generate new embedding
             current.embedding = await self.embedder.embed(current.content)
 
             current.metadata["augmented"] = current.metadata.get("augmented", 0) + 1
             current.metadata["last_augment"] = datetime.now().isoformat()
             current.updated_at = datetime.now()
 
-            await self.graph_store.update_node(current)
-
-            # Sync changes to vector store
-            if self.sync_manager:
-                await self.sync_manager.sync_memory_full(current)
+            # Update via MemoryStore (handles both stores)
+            await self.memory_store.update_memory(current)
 
             return MemoryEvolution(
                 current_version=current.id,
@@ -185,12 +155,8 @@ class MemoryEvolutionService:
                 updated_at=datetime.now(),
             )
 
-            # Add new memory to graph store
-            await self.graph_store.add_node(new_memory)
-
-            # Sync to vector store
-            if self.sync_manager:
-                await self.sync_manager.sync_memory_full(new_memory)
+            # Create via MemoryStore (handles both stores)
+            await self.memory_store.create_memory(new_memory)
 
             return MemoryEvolution(
                 current_version=current.id,
@@ -306,7 +272,9 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
 
         # Walk backwards through versions
         while current_id:
-            memory = await self.graph_store.get_node(current_id)
+            memory = await self.memory_store.get_memory(current_id, track_access=False)
+            if not memory:
+                break
             versions.append(
                 {
                     "id": memory.id,
@@ -359,18 +327,18 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             List of memories valid at that time, optionally ranked by semantic similarity
         """
         # Hybrid approach: Semantic search + temporal filtering
-        if use_semantic_search and self.vector_store and query_embedding:
+        if use_semantic_search and query_embedding:
             # Step 1: Get semantically similar memories from vector store
-            similar_results = await self.vector_store.search_similar(
-                vector=query_embedding,
+            similar_results = await self.memory_store.search_similar(
+                query_embedding=query_embedding,
                 limit=limit * 5,  # Get more candidates for temporal filtering
+                track_access=False,
             )
 
             # Step 2: Filter by temporal validity
             valid_memories = []
             for result in similar_results:
-                memory = result.memory
-                # Check if memory was valid at the specified time
+                memory = result[0]
                 if memory.valid_from <= as_of and (
                     memory.valid_until is None or memory.valid_until > as_of
                 ):
@@ -381,23 +349,18 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
 
             return valid_memories[:limit]
 
-        # Fallback: Temporal-only filtering (no semantic search)
-        # Use Neo4j's temporal filtering capabilities
         filters = {
             "created_before": as_of.isoformat(),
         }
 
-        # Get all candidates that could have been valid at that time
-        candidates = await self.graph_store.query_memories(
+        candidates = await self.memory_store.graph_store.query_memories(
             filters=filters,
             order_by="created_at DESC",
-            limit=limit * 3,  # Get more candidates to ensure we have enough valid ones
+            limit=limit * 3,
         )
 
-        # Filter to memories that were temporally valid at the specified time
         valid_memories = []
         for memory in candidates:
-            # Check temporal validity window
             if memory.valid_from <= as_of and (
                 memory.valid_until is None or memory.valid_until > as_of
             ):
@@ -421,11 +384,14 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
         Returns:
             Current active version
         """
-        memory = await self.graph_store.get_node(memory_id)
+        memory = await self.memory_store.get_memory(memory_id, track_access=False)
+        if not memory:
+            return None
 
-        # Follow supersession chain
         while memory.superseded_by:
-            memory = await self.graph_store.get_node(memory.superseded_by)
+            memory = await self.memory_store.get_memory(memory.superseded_by, track_access=False)
+            if not memory:
+                break
 
         return memory
 
@@ -442,7 +408,9 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             New memory with rolled back content
         """
         # Get target version
-        target = await self.graph_store.get_node(target_version_id)
+        target = await self.memory_store.get_memory(target_version_id, track_access=False)
+        if not target:
+            raise ValueError(f"Target version not found: {target_version_id}")
 
         # Get current version
         current = await self.get_current_version(target_version_id)
@@ -452,7 +420,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             id=f"{current.id}_rollback_{datetime.now().timestamp()}",
             content=target.content,
             type=target.type,
-            embedding=target.embedding,  # Reuse embedding
+            embedding=target.embedding,
             version=current.version + 1,
             parent_version=current.id,
             valid_from=datetime.now(),
@@ -473,14 +441,8 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
         current.superseded_by = new_version.id
         current.invalidation_reason = f"Rolled back to version {target.version}"
 
-        # Save both - graph store first
-        await self.graph_store.update_node(current)
-        await self.graph_store.add_node(new_version)
-
-        # Sync changes to vector store if sync manager available
-        if self.sync_manager:
-            await self.sync_manager.sync_memory_supersession(current)
-            # Sync new version as well
-            await self.sync_manager.sync_memory_full(new_version)
+        # Update via MemoryStore (handles both stores)
+        await self.memory_store.update_memory(current)
+        await self.memory_store.create_memory(new_version)
 
         return new_version

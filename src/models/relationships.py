@@ -15,44 +15,42 @@ class RelationshipType(str, Enum):
     """Types of relationships between memories."""
 
     # Semantic
-    SIMILAR_TO = "SIMILAR_TO"  # Semantically similar
-    REFERENCES = "REFERENCES"  # Mentions/cites
+    SIMILAR_TO = "SIMILAR_TO"
+    REFERENCES = "REFERENCES"
 
     # Temporal/Causal
-    PRECEDES = "PRECEDES"  # Comes before
-    FOLLOWS = "FOLLOWS"  # Comes after
-    UPDATES = "UPDATES"  # Updates/corrects
+    PRECEDES = "PRECEDES"
+    FOLLOWS = "FOLLOWS"
+    UPDATES = "UPDATES"
 
     # Hierarchical
-    PART_OF = "PART_OF"  # Component of larger whole
-    BELONGS_TO = "BELONGS_TO"  # Member of category
-    PARENT_OF = "PARENT_OF"  # Parent in hierarchy
+    PART_OF = "PART_OF"
+    BELONGS_TO = "BELONGS_TO"
+    PARENT_OF = "PARENT_OF"
 
     # Logical
-    CONTRADICTS = "CONTRADICTS"  # Conflicts with
-    SUPPORTS = "SUPPORTS"  # Provides evidence for
-    REQUIRES = "REQUIRES"  # Prerequisite
-    DEPENDS_ON = "DEPENDS_ON"  # Dependency
+    CONTRADICTS = "CONTRADICTS"
+    SUPPORTS = "SUPPORTS"
+    REQUIRES = "REQUIRES"
+    DEPENDS_ON = "DEPENDS_ON"
 
     # Synthesis
-    DERIVED_FROM = "DERIVED_FROM"  # Synthesized from
-    SYNTHESIZES = "SYNTHESIZES"  # Creates synthesis
+    DERIVED_FROM = "DERIVED_FROM"
+    SYNTHESIZES = "SYNTHESIZES"
 
     # Entity
-    CO_OCCURS = "CO_OCCURS"  # Shared entities
-    MENTIONS = "MENTIONS"  # Mentions entity
+    CO_OCCURS = "CO_OCCURS"
+    MENTIONS = "MENTIONS"
 
     # Conversation
-    RESPONDS_TO = "RESPONDS_TO"  # Response in conversation
+    RESPONDS_TO = "RESPONDS_TO"
 
 
 class Edge(BaseModel):
-    """
-    Relationship edge between two nodes.
-    """
+    """Relationship edge between two nodes."""
 
-    source: str  # Source node ID
-    target: str  # Target node ID
+    source: str
+    target: str
     type: RelationshipType
     confidence: float = 1.0
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -65,105 +63,62 @@ class Edge(BaseModel):
 
 
 class Relationship(BaseModel):
-    """Individual relationship between memories."""
+    """Individual relationship between memories for LLM structured output."""
 
     model_config = {"extra": "ignore"}
 
-    type: RelationshipType = Field(
-        ...,
-        description="REQUIRED: The type of relationship. Must be one of the valid RelationshipType enum values (SIMILAR_TO, REFERENCES etc.)",
-    )
-    target_id: str = Field(
-        ..., description="REQUIRED: The ID of the target memory that this relationship points to"
-    )
+    type: RelationshipType = Field(..., description="Relationship type")
+    target_id: str = Field(..., description="Target memory ID")
     confidence: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="REQUIRED: Confidence score between 0.0 and 1.0. Use 1.0 for explicit relationships, 0.7-0.9 for strong inferences, 0.5-0.7 for weak inferences",
+        description="Confidence (0-1): 1.0=explicit, 0.7-0.9=strong, 0.5-0.7=weak",
     )
-    reasoning: str = Field(
-        ...,
-        description="REQUIRED: Explain why this relationship exists. Provide specific evidence from both memories.",
-    )
+    reasoning: str = Field(..., description="Why this relationship exists with specific evidence")
 
 
 class DerivedInsight(BaseModel):
-    """
-    LLM-generated insight derived from multiple memories.
-    """
+    """LLM-generated insight from multiple memories for structured output."""
 
     model_config = {"extra": "ignore"}
 
-    content: str = Field(
-        ...,
-        description="REQUIRED: The actual insight content. Should be a clear, concise statement of the discovered pattern or conclusion.",
-    )
-    confidence: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="REQUIRED: Confidence in this insight between 0.0 and 1.0. Higher for insights with strong supporting evidence.",
-    )
-    reasoning: str = Field(
-        ...,
-        description="REQUIRED: Explain how this insight was derived from the source memories. Include specific evidence.",
-    )
-    source_ids: list[str] = Field(
-        ...,
-        description="REQUIRED: List of memory IDs that contributed to this insight. Must include at least one ID.",
-    )
+    content: str = Field(..., description="Insight statement describing the pattern or conclusion")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence (0-1) in this insight")
+    reasoning: str = Field(..., description="How insight was derived with specific evidence")
+    source_ids: list[str] = Field(..., description="Memory IDs that contributed (min 1)")
     type: str = Field(
-        ...,
-        description="REQUIRED: Type of insight. Must be one of: 'pattern_recognition', 'summary', 'inference', 'abstraction'",
+        ..., description="Type: pattern_recognition, summary, inference, or abstraction"
     )
 
 
 class RelationshipBundle(BaseModel):
     """
-    Complete set of relationships extracted for a memory.
+    Complete set of relationships extracted for a memory (LLM structured output).
+
+    Note: This is the minimal model for LLM output. Tracking fields like extraction_time_ms
+    should be added after LLM call, not included in the model schema.
     """
 
     model_config = {"extra": "ignore"}
 
-    memory_id: str = Field(
-        ...,
-        description="REQUIRED: The ID of the memory for which relationships are being extracted",
-    )
+    memory_id: str = Field(..., description="Memory ID for which relationships are extracted")
     relationships: list[Relationship] = Field(
-        default_factory=list,
-        description="OPTIONAL: List of direct relationships to other memories. Can be empty if no relationships found.",
+        default_factory=list, description="Direct relationships to other memories (or empty)"
     )
     derived_insights: list[DerivedInsight] = Field(
-        default_factory=list,
-        description="OPTIONAL: List of insights derived from analyzing multiple memories together. Can be empty.",
-    )
-    extraction_time_ms: float = Field(
-        default=0.0,
-        description="OPTIONAL: Time taken to extract relationships in milliseconds. For internal tracking.",
+        default_factory=list, description="Insights from analyzing multiple memories (or empty)"
     )
 
 
 class ContextBundle(BaseModel):
-    """
-    Complete context gathered for relationship extraction.
-    """
+    """Complete context gathered for relationship extraction."""
 
-    model_config = {"extra": "ignore"}  # Ignore extra fields
+    model_config = {"extra": "ignore"}
 
-    vector_candidates: list[Memory] = Field(default_factory=list)  # Top vector matches
-    temporal_context: list[Memory] = Field(default_factory=list)  # Recent memories
-    graph_context: list[Memory] = Field(default_factory=list)  # Graph neighbors
-    entity_context: list[Memory] = Field(default_factory=list)  # Shared entities
-    conversation_context: list[Memory] = Field(default_factory=list)  # Thread context
-    filtered_candidates: list[Memory] = Field(default_factory=list)  # Final filtered set
-
-
-class FilterStageResult(BaseModel):
-    """Result from a filtering stage."""
-
-    stage: str
-    candidates_in: int
-    candidates_out: int
-    time_ms: float
-    method: str
+    vector_candidates: list[Memory] = Field(default_factory=list)
+    temporal_context: list[Memory] = Field(default_factory=list)
+    graph_context: list[Memory] = Field(default_factory=list)
+    entity_context: list[Memory] = Field(default_factory=list)
+    conversation_context: list[Memory] = Field(default_factory=list)
+    filtered_candidates: list[Memory] = Field(default_factory=list)

@@ -231,13 +231,11 @@ async def mock_vector_store(qdrant_vector_store):
 
 
 @pytest.fixture
-def mock_sync_manager(neo4j_graph_store, mock_vector_store):
-    """Create a sync manager for testing."""
-    from src.services.memory_sync import MemorySyncManager
+def memory_store(neo4j_graph_store, mock_vector_store):
+    """Create MemoryStore facade for testing."""
+    from src.core.memory_store import MemoryStore
 
-    return MemorySyncManager(
-        graph_store=neo4j_graph_store,
+    return MemoryStore(
         vector_store=mock_vector_store,
-        max_retries=3,
-        retry_delay=0.5,
+        graph_store=neo4j_graph_store,
     )
