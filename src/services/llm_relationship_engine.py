@@ -17,6 +17,7 @@ from src.models.relationships import (
     Edge,
     Relationship,
     RelationshipBundle,
+    RelationshipType,
 )
 from src.services.context_filter import MultiStageFilter
 from src.services.invalidation_manager import InvalidationManager
@@ -116,7 +117,19 @@ class LLMRelationshipEngine:
                 edge_tasks.append(self.memory_store.add_relationship(edge))
 
         if edge_tasks:
-            await asyncio.gather(*edge_tasks, return_exceptions=True)
+            results = await asyncio.gather(*edge_tasks, return_exceptions=True)
+            # Log any errors that occurred during edge creation
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.error(
+                        f"Failed to create edge {i+1}/{len(edge_tasks)}: {result}",
+                        extra={
+                            "memory_id": memory.id,
+                            "error": str(result),
+                            "error_type": type(result).__name__,
+                        },
+                        exc_info=result,
+                    )
 
         if extraction.derived_insights:
             logger.debug(f"Creating {len(extraction.derived_insights)} derived memories")
@@ -307,24 +320,25 @@ Begin extraction:
 
     def _create_edge_from_relationship(self, source_id: str, rel: Relationship) -> Edge:
         """
-        Create edge dict from relationship.
+        Create Edge object from relationship.
 
         Args:
             source_id: Source memory ID
             rel: Relationship data
 
         Returns:
-            Edge dictionary
+            Edge object
         """
-        return {
-            "source": source_id,
-            "target": rel.target_id,
-            "type": rel.type,
-            "metadata": {
+        return Edge(
+            source=source_id,
+            target=rel.target_id,
+            type=rel.type,
+            confidence=rel.confidence,
+            metadata={
                 "confidence": rel.confidence,
                 "reasoning": rel.reasoning,
             },
-        }
+        )
 
     async def _create_derived_memories(self, insights: list[DerivedInsight], source_memory: Memory):
         """
@@ -371,7 +385,7 @@ Begin extraction:
                         Edge(
                             source=derived.id,
                             target=source_id,
-                            type="DERIVED_FROM",
+                            type=RelationshipType.DERIVED_FROM,
                             confidence=insight.confidence,
                             metadata={"confidence": insight.confidence},
                         )

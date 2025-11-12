@@ -195,7 +195,12 @@ class MemoryEngine:
             raise MemoryError(f"Unexpected error adding memory: {e}") from e
 
     async def get_memory(
-        self, memory_id: str, validate: bool = True, track_access: bool = True
+        self,
+        memory_id: str,
+        validate: bool = True,
+        track_access: bool = True,
+        include_relationships: bool = False,
+        relationship_limit: int = 100,
     ) -> Memory | None:
         """
         Retrieve a memory by ID.
@@ -204,6 +209,8 @@ class MemoryEngine:
             memory_id: Memory identifier
             validate: Whether to check validity on access
             track_access: Whether to track this access (increments access_count)
+            include_relationships: Whether to include relationship data in metadata
+            relationship_limit: Maximum number of relationships to include
 
         Returns:
             Memory or None if not found
@@ -220,7 +227,8 @@ class MemoryEngine:
             memory = await self.memory_store.get_memory(
                 memory_id=memory_id,
                 track_access=track_access,
-                include_relationships=False,
+                include_relationships=include_relationships,
+                relationship_limit=relationship_limit,
             )
 
             if not memory:

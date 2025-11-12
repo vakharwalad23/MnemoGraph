@@ -121,7 +121,7 @@ class TestLLMRelationshipEngineUnit:
             config=config,
         )
 
-        from src.models.relationships import Relationship
+        from src.models.relationships import Edge, Relationship
 
         rel = Relationship(
             type=RelationshipType.SIMILAR_TO,
@@ -132,11 +132,14 @@ class TestLLMRelationshipEngineUnit:
 
         edge = engine._create_edge_from_relationship("mem_source", rel)
 
-        assert edge["source"] == "mem_source"
-        assert edge["target"] == "mem_target"
-        assert edge["type"] == RelationshipType.SIMILAR_TO
-        assert edge["metadata"]["confidence"] == 0.85
-        assert edge["metadata"]["reasoning"] == "Similar content"
+        # Verify it returns an Edge object
+        assert isinstance(edge, Edge)
+        assert edge.source == "mem_source"
+        assert edge.target == "mem_target"
+        assert edge.type == RelationshipType.SIMILAR_TO
+        assert edge.confidence == 0.85
+        assert edge.metadata["confidence"] == 0.85
+        assert edge.metadata["reasoning"] == "Similar content"
 
 
 @pytest.mark.integration

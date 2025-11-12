@@ -320,48 +320,94 @@ class Neo4jGraphStore(GraphStore):
         """Add an edge between two nodes."""
         await self.connect()
 
-        # Handle both dict and Edge object
-        if isinstance(edge, Edge):
-            source_id = edge.source
-            target_id = edge.target
-            edge_type = edge.type.value if isinstance(edge.type, RelationshipType) else edge.type
-            confidence = edge.confidence
-            metadata = edge.metadata
-            created_at = edge.created_at.isoformat()
-        else:
-            source_id = edge["source"]
-            target_id = edge["target"]
-            edge_type = edge["type"]
-            confidence = edge.get("metadata", {}).get("confidence", 1.0)
-            metadata = edge.get("metadata", {})
-            created_at = datetime.now().isoformat()
+        try:
+            # Handle both dict and Edge object
+            if isinstance(edge, Edge):
+                source_id = edge.source
+                target_id = edge.target
+                edge_type = (
+                    edge.type.value if isinstance(edge.type, RelationshipType) else edge.type
+                )
+                confidence = edge.confidence
+                metadata = edge.metadata
+                created_at = edge.created_at.isoformat()
+            else:
+                source_id = edge["source"]
+                target_id = edge["target"]
+                edge_type_raw = edge["type"]
+                # Handle RelationshipType enum in dict case
+                if isinstance(edge_type_raw, RelationshipType):
+                    edge_type = edge_type_raw.value
+                elif isinstance(edge_type_raw, str):
+                    edge_type = edge_type_raw
+                else:
+                    edge_type = str(edge_type_raw)
+                confidence = edge.get("metadata", {}).get("confidence", 1.0)
+                metadata = edge.get("metadata", {})
+                created_at = datetime.now().isoformat()
 
-        edge_id = str(uuid4())
+            # Ensure edge_type is a string for the query
+            if not isinstance(edge_type, str):
+                edge_type = str(edge_type)
 
-        async with self.driver.session(database=self.database) as session:
-            # Use dynamic relationship type
-            await session.run(
-                f"""
-                MATCH (a:Memory {{id: $source_id}})
-                MATCH (b:Memory {{id: $target_id}})
-                CREATE (a)-[r:{edge_type.upper()} {{
-                    id: $edge_id,
-                    confidence: $confidence,
-                    created_at: $created_at,
-                    metadata: $metadata
-                }}]->(b)
-                """,
-                {
-                    "source_id": source_id,
-                    "target_id": target_id,
-                    "edge_id": edge_id,
-                    "confidence": confidence,
-                    "created_at": created_at,
-                    "metadata": json.dumps(metadata),
+            edge_id = str(uuid4())
+
+            async with self.driver.session(database=self.database) as session:
+                # Use dynamic relationship type
+                result = await session.run(
+                    f"""
+                    MATCH (a:Memory {{id: $source_id}})
+                    MATCH (b:Memory {{id: $target_id}})
+                    CREATE (a)-[r:{edge_type.upper()} {{
+                        id: $edge_id,
+                        confidence: $confidence,
+                        created_at: $created_at,
+                        metadata: $metadata
+                    }}]->(b)
+                    RETURN r
+                    """,
+                    {
+                        "source_id": source_id,
+                        "target_id": target_id,
+                        "edge_id": edge_id,
+                        "confidence": confidence,
+                        "created_at": created_at,
+                        "metadata": json.dumps(metadata),
+                    },
+                )
+
+                # Consume the result to ensure the query executed
+                record = await result.single()
+                if not record:
+                    raise GraphStoreError(
+                        f"Failed to create edge: {source_id} -> {target_id} ({edge_type})"
+                    )
+
+                logger.debug(
+                    f"Created edge: {source_id} -> {target_id} ({edge_type})",
+                    extra={
+                        "source_id": source_id,
+                        "target_id": target_id,
+                        "edge_type": edge_type,
+                        "edge_id": edge_id,
+                    },
+                )
+
+            return edge_id
+
+        except Exception as e:
+            logger.error(
+                f"Failed to add edge: {e}",
+                extra={
+                    "source_id": source_id if "source_id" in locals() else None,
+                    "target_id": target_id if "target_id" in locals() else None,
+                    "edge_type": edge_type if "edge_type" in locals() else None,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
                 },
+                exc_info=e,
             )
-
-        return edge_id
+            raise GraphStoreError(f"Failed to add edge: {e}") from e
 
     async def get_edge(self, edge_id: str) -> dict[str, Any] | None:
         """Get edge by ID."""

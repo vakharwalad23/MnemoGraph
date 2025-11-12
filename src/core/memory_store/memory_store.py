@@ -64,6 +64,7 @@ class MemoryStore:
         memory_id: str,
         track_access: bool = True,
         include_relationships: bool = False,
+        relationship_limit: int = 100,
     ) -> Memory | None:
         """
         Get memory from vector store (source of truth).
@@ -72,6 +73,7 @@ class MemoryStore:
             memory_id: Unique identifier for the memory
             track_access: Whether to increment access count and update last_accessed
             include_relationships: Whether to include relationship data from graph
+            relationship_limit: Maximum number of relationships to include (if include_relationships=True)
 
         Returns:
             Memory object if found, None otherwise
@@ -102,8 +104,25 @@ class MemoryStore:
 
             # Optionally enrich with relationships from graph
             if include_relationships and memory:
-                # Attach relationship data (can be used by services)
-                memory.metadata["_relationships"] = await self._get_relationship_summary(memory_id)
+                # Get full relationship details (without tracking access again)
+                neighbors = await self.get_neighbors(
+                    memory_id=memory_id,
+                    limit=relationship_limit,
+                    track_access=False,
+                )
+                # Attach relationship edges to metadata
+                memory.metadata["_relationships"] = {
+                    "count": len(neighbors),
+                    "edges": [
+                        {
+                            "target_id": edge.target,
+                            "type": edge.type.value,
+                            "confidence": edge.confidence,
+                            "metadata": edge.metadata,
+                        }
+                        for _, edge in neighbors
+                    ],
+                }
 
             return memory
 
