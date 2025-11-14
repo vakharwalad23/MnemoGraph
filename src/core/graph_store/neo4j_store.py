@@ -336,10 +336,6 @@ class Neo4jGraphStore(GraphStore):
                 query += " AND m.created_at < $created_before"
                 params["created_before"] = filters["created_before"]
 
-            if "access_count_lt" in filters:
-                query += " AND m.access_count < $access_count_lt"
-                params["access_count_lt"] = filters["access_count_lt"]
-
         query += " RETURN m"
 
         if order_by:
