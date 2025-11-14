@@ -147,8 +147,8 @@ class MemoryStore:
 
             return memory
 
-        except VectorStoreError:
-            # Let store errors propagate
+        except (VectorStoreError, SecurityError):
+            # Let store errors and security errors propagate
             raise
         except Exception as e:
             logger.error(
@@ -313,8 +313,8 @@ class MemoryStore:
             )
             return memory
 
-        except (ValidationError, VectorStoreError):
-            # Let validation and store errors propagate
+        except (ValidationError, VectorStoreError, SecurityError, NotFoundError):
+            # Let validation, store, security, and not found errors propagate
             raise
         except Exception as e:
             logger.error(
@@ -347,6 +347,16 @@ class MemoryStore:
         )
 
         try:
+            # Verify ownership before deleting (get from vector store - source of truth)
+            memory = await self.vector_store.get_memory(memory_id)
+            if not memory:
+                raise NotFoundError(f"Memory not found: {memory_id}")
+            if memory.user_id != user_id:
+                raise SecurityError(
+                    f"Memory {memory_id} belongs to user {memory.user_id}, "
+                    f"not the requested user {user_id}"
+                )
+
             # Delete from vector store (source of truth)
             await self.vector_store.delete_memory(memory_id)
             logger.debug(
@@ -366,8 +376,8 @@ class MemoryStore:
                 extra={"memory_id": memory_id},
             )
 
-        except (VectorStoreError, GraphStoreError):
-            # Let store errors propagate
+        except (VectorStoreError, GraphStoreError, SecurityError):
+            # Let store errors and security errors propagate
             raise
         except Exception as e:
             logger.error(

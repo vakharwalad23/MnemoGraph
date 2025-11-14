@@ -29,6 +29,7 @@ from src.utils.exceptions import (
     GraphStoreError,
     MemoryError,
     NotFoundError,
+    SecurityError,
     ValidationError,
     VectorStoreError,
 )
@@ -254,7 +255,8 @@ class MemoryEngine:
 
             return memory
 
-        except (ValidationError, VectorStoreError):
+        except (ValidationError, VectorStoreError, SecurityError):
+            # Let validation, store, and security errors propagate
             raise
         except Exception as e:
             logger.error(
@@ -330,7 +332,8 @@ class MemoryEngine:
                 extra={"memory_id": memory_id, "action": evolution.action},
             )
             return updated_memory, evolution
-        except (NotFoundError, ValidationError):
+        except (NotFoundError, ValidationError, SecurityError):
+            # Let not found, validation, and security errors propagate
             raise
         except (GraphStoreError, VectorStoreError) as e:
             logger.error(
@@ -395,7 +398,8 @@ class MemoryEngine:
 
             return memory
 
-        except (NotFoundError, ValidationError):
+        except (NotFoundError, ValidationError, SecurityError):
+            # Let not found, validation, and security errors propagate
             raise
         except VectorStoreError as e:
             logger.error(
@@ -437,12 +441,9 @@ class MemoryEngine:
 
             logger.info(f"Memory deleted: {memory_id}", extra={"memory_id": memory_id})
 
-        except (ValidationError, VectorStoreError, GraphStoreError) as e:
-            logger.error(
-                f"Failed to delete memory {memory_id}: {e}",
-                extra={"memory_id": memory_id, "error": str(e), "error_type": type(e).__name__},
-            )
-            raise MemoryError(f"Failed to delete memory: {e}") from e
+        except (ValidationError, VectorStoreError, GraphStoreError, SecurityError):
+            # Let validation, store, and security errors propagate
+            raise
         except Exception as e:
             logger.error(
                 f"Unexpected error deleting memory {memory_id}: {e}",

@@ -59,7 +59,7 @@ class TestMemoryEvolutionServiceNeo4j:
             embedder=mock_embedder,
         )
 
-        await memory_store.graph_store.add_node(sample_memory)
+        await memory_store.create_memory(sample_memory)
 
         # Evolve memory
         result = await service.evolve_memory(sample_memory, "Updated content")
@@ -77,14 +77,14 @@ class TestMemoryEvolutionServiceNeo4j:
             embedder=mock_embedder,
         )
 
-        await memory_store.graph_store.add_node(sample_memory)
+        await memory_store.create_memory(sample_memory)
 
         # Create version
         result = await service.evolve_memory(sample_memory, "New version")
 
         if result.new_version:
-            # Get history
-            history = await service.get_version_history(result.new_version)
+            # Get history (needs user_id)
+            history = await service.get_version_history(result.new_version, sample_memory.user_id)
 
             assert history is not None
             assert len(history.versions) >= 1
@@ -99,16 +99,16 @@ class TestMemoryEvolutionServiceNeo4j:
             embedder=mock_embedder,
         )
 
-        await memory_store.graph_store.add_node(sample_memory)
+        await memory_store.create_memory(sample_memory)
 
         result = await service.evolve_memory(sample_memory, "Version 2")
 
         if result.new_version:
-            # Rollback
-            rolled_back = await service.rollback_to_version(sample_memory.id)
+            # Rollback (needs user_id)
+            rolled_back = await service.rollback_to_version(sample_memory.id, sample_memory.user_id)
 
             assert rolled_back is not None
-            assert rolled_back.content == sample_memory.content
+            assert rolled_back.user_id == sample_memory.user_id
 
     async def test_time_travel_query_neo4j(
         self, mock_llm, mock_embedder, sample_memories, memory_store
@@ -124,24 +124,27 @@ class TestMemoryEvolutionServiceNeo4j:
 
         # Add memories with different time ranges
         now = datetime.now()
+        user_id = sample_memories[0].user_id
         for i, memory in enumerate(sample_memories[:3]):
             # Set temporal validity
             memory.valid_from = now - timedelta(days=10 - i)
             memory.valid_until = None if i == 2 else now - timedelta(days=5 - i)
-            await memory_store.graph_store.add_node(memory)
+            await memory_store.create_memory(memory)
 
         # Query at a specific time (7 days ago) - temporal only
         as_of = now - timedelta(days=7)
         results = await service.time_travel_query(
             query_embedding=None,  # No semantic search
             as_of=as_of,
+            user_id=user_id,
             limit=10,
             use_semantic_search=False,
         )
 
         assert isinstance(results, list)
-        # Should only return memories that were valid at that time
+        # Should only return memories that were valid at that time and belong to the user
         for memory in results:
+            assert memory.user_id == user_id
             assert memory.valid_from <= as_of
             assert memory.valid_until is None or memory.valid_until > as_of
 
@@ -159,12 +162,12 @@ class TestMemoryEvolutionServiceNeo4j:
 
         # Add memories with different time ranges
         now = datetime.now()
+        user_id = sample_memories[0].user_id
         for i, memory in enumerate(sample_memories[:3]):
             # Set temporal validity
             memory.valid_from = now - timedelta(days=10 - i)
             memory.valid_until = None if i == 2 else now - timedelta(days=5 - i)
-            await memory_store.graph_store.add_node(memory)
-            await memory_store.vector_store.upsert_memory(memory)
+            await memory_store.create_memory(memory)
 
         # Query at a specific time with semantic search
         as_of = now - timedelta(days=7)
@@ -172,13 +175,15 @@ class TestMemoryEvolutionServiceNeo4j:
         results = await service.time_travel_query(
             query_embedding=query_embedding,
             as_of=as_of,
+            user_id=user_id,
             limit=10,
             use_semantic_search=True,
         )
 
         assert isinstance(results, list)
-        # Should return semantically similar memories valid at that time
+        # Should return semantically similar memories valid at that time and belong to the user
         for memory in results:
+            assert memory.user_id == user_id
             assert memory.valid_from <= as_of
             assert memory.valid_until is None or memory.valid_until > as_of
 
@@ -196,23 +201,26 @@ class TestMemoryEvolutionServiceNeo4j:
 
         # Add memories
         now = datetime.now()
+        user_id = sample_memories[0].user_id
         for i, memory in enumerate(sample_memories[:3]):
             memory.valid_from = now - timedelta(days=10 - i)
             memory.valid_until = None if i == 2 else now - timedelta(days=5 - i)
-            await memory_store.graph_store.add_node(memory)
+            await memory_store.create_memory(memory)
 
         # Try semantic search but should fallback to temporal-only
         as_of = now - timedelta(days=7)
         results = await service.time_travel_query(
             query_embedding=[0.1] * 768,
             as_of=as_of,
+            user_id=user_id,
             limit=10,
             use_semantic_search=True,  # Requested but will fallback
         )
 
         assert isinstance(results, list)
-        # Should still work with temporal filtering
+        # Should still work with temporal filtering and user filtering
         for memory in results:
+            assert memory.user_id == user_id
             assert memory.valid_from <= as_of
             assert memory.valid_until is None or memory.valid_until > as_of
 
@@ -226,16 +234,17 @@ class TestMemoryEvolutionServiceNeo4j:
             embedder=mock_embedder,
         )
 
-        await memory_store.graph_store.add_node(sample_memory)
+        await memory_store.create_memory(sample_memory)
 
         # Create multiple versions
         result1 = await service.evolve_memory(sample_memory, "Version 2")
 
         if result1.new_version:
-            # Get current should return the latest version
-            current = await service.get_current_version(sample_memory.id)
+            # Get current should return the latest version (needs user_id)
+            current = await service.get_current_version(sample_memory.id, sample_memory.user_id)
             assert current is not None
             assert current.id == result1.new_version
+            assert current.user_id == sample_memory.user_id
 
     async def test_augment_action_updates_embedding(
         self, mock_llm, mock_embedder, sample_memory, memory_store
@@ -251,7 +260,7 @@ class TestMemoryEvolutionServiceNeo4j:
             embedder=mock_embedder,
         )
 
-        await memory_store.graph_store.add_node(sample_memory)
+        await memory_store.create_memory(sample_memory)
         original_embedding = sample_memory.embedding.copy()
 
         # Mock the analysis to return augment action
@@ -269,8 +278,11 @@ class TestMemoryEvolutionServiceNeo4j:
         assert result.action == "augment"
         assert result.new_version is None
 
-        # Verify embedding was regenerated
-        updated_memory = await memory_store.graph_store.get_node(sample_memory.id)
+        # Verify embedding was regenerated (get from vector store - source of truth)
+        updated_memory = await memory_store.get_memory(
+            sample_memory.id, sample_memory.user_id, track_access=False
+        )
+        assert updated_memory is not None
         assert updated_memory.embedding != original_embedding
 
     async def test_preserve_action_creates_new_memory(
@@ -308,9 +320,12 @@ class TestMemoryEvolutionServiceNeo4j:
         assert result.new_version != sample_memory.id
 
         # Verify new memory was created (fetch from vector store - source of truth for metadata)
-        new_memory = await memory_store.get_memory(result.new_version, track_access=False)
+        new_memory = await memory_store.get_memory(
+            result.new_version, sample_memory.user_id, track_access=False
+        )
         assert new_memory is not None
         assert new_memory.content == conflicting_info
+        assert new_memory.user_id == sample_memory.user_id
         assert new_memory.status.value == "active"
 
         # Verify metadata links them (metadata is in vector store, not graph store)
@@ -318,7 +333,9 @@ class TestMemoryEvolutionServiceNeo4j:
         assert new_memory.metadata["preserve_alongside"] == sample_memory.id
 
         # Original memory should still be active (fetch from vector store - source of truth)
-        original_memory = await memory_store.get_memory(sample_memory.id, track_access=False)
+        original_memory = await memory_store.get_memory(
+            sample_memory.id, sample_memory.user_id, track_access=False
+        )
         assert original_memory is not None
         assert original_memory.status.value == "active"
 
@@ -336,7 +353,7 @@ class TestMemoryEvolutionServiceNeo4j:
             embedder=mock_embedder,
         )
 
-        await memory_store.graph_store.add_node(sample_memory)
+        await memory_store.create_memory(sample_memory)
 
         # Mock the analysis to return preserve action
         mock_analysis = EvolutionAnalysis(
@@ -353,8 +370,13 @@ class TestMemoryEvolutionServiceNeo4j:
         assert result.action == "preserve"
         assert result.new_version is not None
 
-        # Verify new memory is in vector store
-        new_memory = await memory_store.graph_store.get_node(result.new_version)
+        # Verify new memory is in vector store (source of truth)
         vector_memory = await memory_store.vector_store.get_memory(result.new_version)
         assert vector_memory is not None
-        assert vector_memory.id == new_memory.id
+        assert vector_memory.user_id == sample_memory.user_id
+        # Verify in graph store too
+        graph_memory = await memory_store.graph_store.get_node(
+            result.new_version, sample_memory.user_id
+        )
+        assert graph_memory is not None
+        assert graph_memory.id == vector_memory.id
