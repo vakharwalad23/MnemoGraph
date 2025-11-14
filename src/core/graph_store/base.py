@@ -39,18 +39,19 @@ class GraphStore(ABC):
         pass
 
     @abstractmethod
-    async def get_node(self, node_id: str) -> Memory | None:
+    async def get_node(self, node_id: str, user_id: str) -> Memory | None:
         """
         Retrieve a memory node by ID.
 
         Args:
             node_id: Node identifier
+            user_id: User ID for filtering (required)
 
         Returns:
             Memory or None if not found
 
         Raises:
-            ValidationError: If node_id is invalid
+            ValidationError: If node_id or user_id is invalid
             GraphStoreError: If retrieval operation fails
         """
         pass
@@ -66,15 +67,16 @@ class GraphStore(ABC):
         pass
 
     @abstractmethod
-    async def delete_node(self, node_id: str) -> None:
+    async def delete_node(self, node_id: str, user_id: str) -> None:
         """
         Delete a node and its edges.
 
         Args:
             node_id: Node identifier
+            user_id: User ID for filtering (required)
 
         Raises:
-            ValidationError: If node_id is invalid
+            ValidationError: If node_id or user_id is invalid
             GraphStoreError: If deletion operation fails
         """
         pass
@@ -82,6 +84,7 @@ class GraphStore(ABC):
     @abstractmethod
     async def query_memories(
         self,
+        user_id: str,
         filters: dict[str, Any] | None = None,
         order_by: str | None = None,
         limit: int = 100,
@@ -90,6 +93,7 @@ class GraphStore(ABC):
         Query memories with filters.
 
         Args:
+            user_id: User ID for filtering (required)
             filters: Filter conditions (e.g., {"status": "active", "created_after": "2024-01-01"})
             order_by: Sort order (e.g., "created_at DESC")
             limit: Maximum results
@@ -101,12 +105,13 @@ class GraphStore(ABC):
 
     @abstractmethod
     async def get_random_memories(
-        self, filters: dict[str, Any] | None = None, limit: int = 10
+        self, user_id: str, filters: dict[str, Any] | None = None, limit: int = 10
     ) -> list[Memory]:
         """
         Get random memories for sampling.
 
         Args:
+            user_id: User ID for filtering (required)
             filters: Optional filters
             limit: Number of memories
 
@@ -116,12 +121,13 @@ class GraphStore(ABC):
         pass
 
     @abstractmethod
-    async def add_edge(self, edge: dict[str, Any] | Edge) -> str:
+    async def add_edge(self, edge: dict[str, Any] | Edge, user_id: str) -> str:
         """
         Add an edge between two nodes.
 
         Args:
             edge: Edge dict or Edge object with source, target, type, metadata
+            user_id: User ID for filtering (required)
 
         Returns:
             Edge ID
@@ -182,6 +188,7 @@ class GraphStore(ABC):
     async def get_neighbors(
         self,
         node_id: str,
+        user_id: str,
         relationship_types: list[str] | None = None,
         direction: str = "outgoing",
         depth: int = 1,
@@ -192,6 +199,7 @@ class GraphStore(ABC):
 
         Args:
             node_id: Node identifier
+            user_id: User ID for filtering (required)
             relationship_types: Filter by specific types
             direction: "outgoing", "incoming", or "both"
             depth: Traversal depth
@@ -203,13 +211,16 @@ class GraphStore(ABC):
         pass
 
     @abstractmethod
-    async def find_path(self, start_id: str, end_id: str, max_depth: int = 5) -> list[str] | None:
+    async def find_path(
+        self, start_id: str, end_id: str, user_id: str, max_depth: int = 5
+    ) -> list[str] | None:
         """
         Find shortest path between two nodes.
 
         Args:
             start_id: Start node ID
             end_id: End node ID
+            user_id: User ID for filtering (required)
             max_depth: Maximum path depth
 
         Returns:
@@ -218,11 +229,12 @@ class GraphStore(ABC):
         pass
 
     @abstractmethod
-    async def count_nodes(self, filters: dict[str, Any] | None = None) -> int:
+    async def count_nodes(self, user_id: str, filters: dict[str, Any] | None = None) -> int:
         """
         Count nodes matching filters.
 
         Args:
+            user_id: User ID for filtering (required)
             filters: Optional filter conditions
 
         Returns:
@@ -231,11 +243,12 @@ class GraphStore(ABC):
         pass
 
     @abstractmethod
-    async def count_edges(self, relationship_type: str | None = None) -> int:
+    async def count_edges(self, user_id: str, relationship_type: str | None = None) -> int:
         """
         Count edges.
 
         Args:
+            user_id: User ID for filtering (required)
             relationship_type: Optional filter by type
 
         Returns:

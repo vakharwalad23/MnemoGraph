@@ -92,6 +92,12 @@ class Neo4jGraphStore(GraphStore):
                     "FOR (m:Memory) REQUIRE m.id IS UNIQUE"
                 )
 
+                # Create composite constraint for safety
+                await session.run(
+                    "CREATE CONSTRAINT memory_user_unique IF NOT EXISTS "
+                    "FOR (m:Memory) REQUIRE (m.id, m.user_id) IS UNIQUE"
+                )
+
                 # Create indices for fast lookups
                 await session.run(
                     "CREATE INDEX memory_status IF NOT EXISTS " "FOR (m:Memory) ON (m.status)"
@@ -107,6 +113,27 @@ class Neo4jGraphStore(GraphStore):
 
                 await session.run(
                     "CREATE INDEX memory_version IF NOT EXISTS " "FOR (m:Memory) ON (m.version)"
+                )
+
+                # CRITICAL: User index for fast filtering
+                await session.run(
+                    "CREATE INDEX memory_user_idx IF NOT EXISTS " "FOR (m:Memory) ON (m.user_id)"
+                )
+
+                # Composite indexes for common query patterns
+                await session.run(
+                    "CREATE INDEX memory_user_status_idx IF NOT EXISTS "
+                    "FOR (m:Memory) ON (m.user_id, m.status)"
+                )
+
+                await session.run(
+                    "CREATE INDEX memory_user_type_idx IF NOT EXISTS "
+                    "FOR (m:Memory) ON (m.user_id, m.type)"
+                )
+
+                await session.run(
+                    "CREATE INDEX memory_user_created_idx IF NOT EXISTS "
+                    "FOR (m:Memory) ON (m.user_id, m.created_at)"
                 )
         except Exception as e:
             logger.error(
@@ -132,16 +159,18 @@ class Neo4jGraphStore(GraphStore):
         - superseded_by: For version chain traversal
 
         Args:
-            memory: Memory object (only minimal fields extracted)
+            memory: Memory object (must have user_id)
 
         Raises:
-            ValidationError: If memory is invalid
+            ValidationError: If memory is invalid or missing user_id
             GraphStoreError: If add operation fails
         """
         if not memory:
             raise ValidationError("Memory cannot be None")
         if not memory.id:
             raise ValidationError("Memory ID cannot be empty")
+        if not memory.user_id:
+            raise ValidationError("Memory must have user_id")
 
         try:
             await self.connect()
@@ -152,7 +181,7 @@ class Neo4jGraphStore(GraphStore):
             async with self.driver.session(database=self.database) as session:
                 await session.run(
                     """
-                    MERGE (m:Memory {id: $id})
+                    MERGE (m:Memory {id: $id, user_id: $user_id})
                     SET m.content_preview = $content_preview,
                         m.type = $type,
                         m.status = $status,
@@ -162,6 +191,7 @@ class Neo4jGraphStore(GraphStore):
                     """,
                     {
                         "id": memory.id,
+                        "user_id": memory.user_id,
                         "content_preview": content_preview,
                         "type": memory.type.value,
                         "status": memory.status.value,
@@ -184,7 +214,7 @@ class Neo4jGraphStore(GraphStore):
             )
             raise GraphStoreError(f"Failed to add node: {e}") from e
 
-    async def get_node(self, node_id: str) -> Memory | None:
+    async def get_node(self, node_id: str, user_id: str) -> Memory | None:
         """
         Retrieve a minimal memory node by ID.
 
@@ -198,29 +228,36 @@ class Neo4jGraphStore(GraphStore):
 
         Args:
             node_id: Node identifier
+            user_id: User ID for filtering (required)
 
         Returns:
             Memory with minimal fields populated, None if not found
 
         Raises:
-            ValidationError: If node_id is invalid
+            ValidationError: If node_id or user_id is invalid
             GraphStoreError: If retrieval operation fails
         """
         if not node_id or not node_id.strip():
             raise ValidationError("Node ID cannot be empty")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
         try:
             await self.connect()
 
             async with self.driver.session(database=self.database) as session:
-                result = await session.run("MATCH (m:Memory {id: $id}) RETURN m", {"id": node_id})
+                # CRITICAL: Always filter by user_id
+                result = await session.run(
+                    "MATCH (m:Memory {id: $id, user_id: $user_id}) RETURN m",
+                    {"id": node_id, "user_id": user_id},
+                )
 
                 record = await result.single()
                 if not record:
                     return None
 
                 node = record["m"]
-                return self._node_to_memory(node)
+                return self._node_to_memory(node, user_id)
         except ValidationError:
             raise
         except Exception as e:
@@ -234,24 +271,53 @@ class Neo4jGraphStore(GraphStore):
         """Update an existing memory node."""
         await self.add_node(memory)  # MERGE handles updates
 
-    async def delete_node(self, node_id: str) -> None:
-        """Delete a node and its edges."""
+    async def delete_node(self, node_id: str, user_id: str) -> None:
+        """
+        Delete a node and its edges.
+
+        Args:
+            node_id: Node identifier
+            user_id: User ID for filtering (required)
+        """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         await self.connect()
 
         async with self.driver.session(database=self.database) as session:
-            await session.run("MATCH (m:Memory {id: $id}) DETACH DELETE m", {"id": node_id})
+            # CRITICAL: Always filter by user_id
+            await session.run(
+                "MATCH (m:Memory {id: $id, user_id: $user_id}) DETACH DELETE m",
+                {"id": node_id, "user_id": user_id},
+            )
 
     async def query_memories(
         self,
+        user_id: str,
         filters: dict[str, Any] | None = None,
         order_by: str | None = None,
         limit: int = 100,
     ) -> list[Memory]:
-        """Query memories with filters."""
+        """
+        Query memories with filters.
+
+        Args:
+            user_id: User ID for filtering (required)
+            filters: Optional additional filter conditions
+            order_by: Sort order
+            limit: Maximum results
+
+        Returns:
+            List of memories
+        """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         await self.connect()
 
-        query = "MATCH (m:Memory) WHERE 1=1"
-        params = {}
+        # CRITICAL: Always start with user filter
+        query = "MATCH (m:Memory {user_id: $user_id}) WHERE 1=1"
+        params = {"user_id": user_id}
 
         if filters:
             if "status" in filters:
@@ -287,18 +353,32 @@ class Neo4jGraphStore(GraphStore):
 
             memories = []
             async for record in result:
-                memories.append(self._node_to_memory(record["m"]))
+                memories.append(self._node_to_memory(record["m"], user_id))
 
             return memories
 
     async def get_random_memories(
-        self, filters: dict[str, Any] | None = None, limit: int = 10
+        self, user_id: str, filters: dict[str, Any] | None = None, limit: int = 10
     ) -> list[Memory]:
-        """Get random memories for sampling."""
+        """
+        Get random memories for sampling.
+
+        Args:
+            user_id: User ID for filtering (required)
+            filters: Optional additional filter conditions
+            limit: Number of memories
+
+        Returns:
+            List of random memories
+        """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         await self.connect()
 
-        query = "MATCH (m:Memory) WHERE 1=1"
-        params = {}
+        # CRITICAL: Always start with user filter
+        query = "MATCH (m:Memory {user_id: $user_id}) WHERE 1=1"
+        params = {"user_id": user_id}
 
         if filters:
             if "status" in filters:
@@ -312,12 +392,28 @@ class Neo4jGraphStore(GraphStore):
 
             memories = []
             async for record in result:
-                memories.append(self._node_to_memory(record["m"]))
+                memories.append(self._node_to_memory(record["m"], user_id))
 
             return memories
 
-    async def add_edge(self, edge: dict[str, Any] | Edge) -> str:
-        """Add an edge between two nodes."""
+    async def add_edge(self, edge: dict[str, Any] | Edge, user_id: str) -> str:
+        """
+        Add an edge between two nodes.
+
+        Args:
+            edge: Edge dict or Edge object with source, target, type, metadata
+            user_id: User ID for filtering (required)
+
+        Returns:
+            Edge ID
+
+        Raises:
+            ValidationError: If user_id is invalid
+            GraphStoreError: If edge creation fails
+        """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         await self.connect()
 
         try:
@@ -353,13 +449,14 @@ class Neo4jGraphStore(GraphStore):
             edge_id = str(uuid4())
 
             async with self.driver.session(database=self.database) as session:
-                # Use dynamic relationship type
+                # CRITICAL: Verify BOTH nodes belong to same user before creating edge
                 result = await session.run(
                     f"""
-                    MATCH (a:Memory {{id: $source_id}})
-                    MATCH (b:Memory {{id: $target_id}})
+                    MATCH (a:Memory {{id: $source_id, user_id: $user_id}})
+                    MATCH (b:Memory {{id: $target_id, user_id: $user_id}})
                     CREATE (a)-[r:{edge_type.upper()} {{
                         id: $edge_id,
+                        user_id: $user_id,
                         confidence: $confidence,
                         created_at: $created_at,
                         metadata: $metadata
@@ -369,6 +466,7 @@ class Neo4jGraphStore(GraphStore):
                     {
                         "source_id": source_id,
                         "target_id": target_id,
+                        "user_id": user_id,
                         "edge_id": edge_id,
                         "confidence": confidence,
                         "created_at": created_at,
@@ -380,7 +478,8 @@ class Neo4jGraphStore(GraphStore):
                 record = await result.single()
                 if not record:
                     raise GraphStoreError(
-                        f"Failed to create edge: {source_id} -> {target_id} ({edge_type})"
+                        f"Failed to create edge: nodes not found or user mismatch. "
+                        f"source_id={source_id}, target_id={target_id}, user_id={user_id}"
                     )
 
                 logger.debug(
@@ -438,20 +537,34 @@ class Neo4jGraphStore(GraphStore):
             }
 
     async def get_edge_between(
-        self, source_id: str, target_id: str, relationship_type: str | None = None
+        self, source_id: str, target_id: str, user_id: str, relationship_type: str | None = None
     ) -> dict[str, Any] | None:
-        """Find edge between two nodes."""
+        """
+        Find edge between two nodes.
+
+        Args:
+            source_id: Source node ID
+            target_id: Target node ID
+            user_id: User ID for filtering (required)
+            relationship_type: Optional filter by type
+
+        Returns:
+            Edge dict or None
+        """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         await self.connect()
 
         query = """
-        MATCH (a:Memory {id: $source_id})-[r]->(b:Memory {id: $target_id})
+        MATCH (a:Memory {id: $source_id, user_id: $user_id})-[r]->(b:Memory {id: $target_id, user_id: $user_id})
         """
 
-        params = {"source_id": source_id, "target_id": target_id}
+        params = {"source_id": source_id, "target_id": target_id, "user_id": user_id}
 
         if relationship_type:
             query = f"""
-            MATCH (a:Memory {{id: $source_id}})-[r:{relationship_type.upper()}]->(b:Memory {{id: $target_id}})
+            MATCH (a:Memory {{id: $source_id, user_id: $user_id}})-[r:{relationship_type.upper()}]->(b:Memory {{id: $target_id, user_id: $user_id}})
             """
 
         query += " RETURN r, type(r) as edge_type LIMIT 1"
@@ -465,7 +578,7 @@ class Neo4jGraphStore(GraphStore):
                 if not relationship_type or relationship_type in ["CO_OCCURS", "SIMILAR_TO"]:
                     result = await session.run(
                         """
-                        MATCH (a:Memory {id: $target_id})-[r]->(b:Memory {id: $source_id})
+                        MATCH (a:Memory {id: $target_id, user_id: $user_id})-[r]->(b:Memory {id: $source_id, user_id: $user_id})
                         RETURN r, type(r) as edge_type LIMIT 1
                         """,
                         params,
@@ -514,12 +627,33 @@ class Neo4jGraphStore(GraphStore):
     async def get_neighbors(
         self,
         node_id: str,
+        user_id: str,
         relationship_types: list[str] | None = None,
         direction: str = "outgoing",
         depth: int = 1,
         limit: int = 100,
     ) -> list[tuple[Memory, Edge]]:
-        """Get neighboring nodes."""
+        """
+        Get neighboring nodes.
+
+        Args:
+            node_id: Node identifier
+            user_id: User ID for filtering (required)
+            relationship_types: Filter by specific types
+            direction: "outgoing", "incoming", or "both"
+            depth: Traversal depth
+            limit: Maximum results
+
+        Returns:
+            List of tuples with (Memory, Edge)
+
+        Raises:
+            ValidationError: If user_id is invalid
+            GraphStoreError: If traversal fails
+        """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         await self.connect()
 
         # Build pattern based on direction
@@ -539,19 +673,49 @@ class Neo4jGraphStore(GraphStore):
         if depth > 1:
             pattern = pattern.replace("[r]", f"[r*1..{depth}]")
 
-        # Include type(r) in the return to get the relationship type
-        query = (
-            f"MATCH {pattern} WHERE m.id = $node_id RETURN n, r, type(r) as rel_type LIMIT {limit}"
-        )
+        # Build query with user filtering
+        if depth > 1:
+            # CRITICAL: For multi-hop, verify ALL nodes in path belong to user
+            query = f"""
+            MATCH {pattern}
+            WHERE m.id = $node_id
+              AND m.user_id = $user_id
+            WITH n, r
+            WHERE ALL(node IN nodes(n) WHERE node.user_id = $user_id)
+              AND n.user_id = $user_id
+              AND n.status = 'active'
+            RETURN DISTINCT n, r, type(r) as rel_type
+            LIMIT {limit}
+            """
+        else:
+            # Single hop - simpler but still strict
+            query = f"""
+            MATCH {pattern}
+            WHERE m.id = $node_id
+              AND m.user_id = $user_id
+              AND n.user_id = $user_id
+              AND n.status = 'active'
+            RETURN n, r, type(r) as rel_type
+            LIMIT {limit}
+            """
 
         async with self.driver.session(database=self.database) as session:
-            result = await session.run(query, {"node_id": node_id})
+            result = await session.run(query, {"node_id": node_id, "user_id": user_id})
 
             neighbors = []
             async for record in result:
                 node = record["n"]
                 rel = record["r"]
                 rel_type = record["rel_type"]
+
+                # Double-check user_id in application layer (defense in depth)
+                if node.get("user_id") != user_id:
+                    logger.warning(
+                        f"User boundary violation detected! "
+                        f"node_id={node['id']}, expected={user_id}, "
+                        f"got={node.get('user_id')}"
+                    )
+                    continue  # Skip this result
 
                 # Handle both single relationship and path
                 if isinstance(rel, list):
@@ -581,23 +745,48 @@ class Neo4jGraphStore(GraphStore):
                         metadata=json.loads(rel.get("metadata", "{}")),
                     )
 
-                neighbors.append((self._node_to_memory(node), edge_info))
+                neighbors.append((self._node_to_memory(node, user_id), edge_info))
 
             return neighbors
 
-    async def find_path(self, start_id: str, end_id: str, max_depth: int = 5) -> list[str] | None:
-        """Find shortest path between two nodes."""
+    async def find_path(
+        self, start_id: str, end_id: str, user_id: str, max_depth: int = 5
+    ) -> list[str] | None:
+        """
+        Find shortest path between two nodes.
+
+        Args:
+            start_id: Start node ID
+            end_id: End node ID
+            user_id: User ID for filtering (required)
+            max_depth: Maximum path depth
+
+        Returns:
+            List of node IDs forming the path, or None
+
+        Raises:
+            ValidationError: If user_id is invalid
+            GraphStoreError: If path finding fails
+        """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         await self.connect()
 
         async with self.driver.session(database=self.database) as session:
+            # CRITICAL: Verify start and end nodes belong to user
+            # AND ensure all intermediate nodes are also in same user
             result = await session.run(
                 f"""
+                MATCH (start:Memory {{id: $start_id, user_id: $user_id}})
+                MATCH (end:Memory {{id: $end_id, user_id: $user_id}})
                 MATCH path = shortestPath(
-                    (start:Memory {{id: $start_id}})-[*..{max_depth}]-(end:Memory {{id: $end_id}})
+                    (start)-[*..{max_depth}]-(end)
                 )
+                WHERE ALL(node IN nodes(path) WHERE node.user_id = $user_id)
                 RETURN [node in nodes(path) | node.id] as node_ids
                 """,
-                {"start_id": start_id, "end_id": end_id},
+                {"start_id": start_id, "end_id": end_id, "user_id": user_id},
             )
 
             record = await result.single()
@@ -608,12 +797,25 @@ class Neo4jGraphStore(GraphStore):
 
     # UTILITY METHODS
 
-    async def count_nodes(self, filters: dict[str, Any] | None = None) -> int:
-        """Count nodes matching filters."""
+    async def count_nodes(self, user_id: str, filters: dict[str, Any] | None = None) -> int:
+        """
+        Count nodes matching filters.
+
+        Args:
+            user_id: User ID for filtering (required)
+            filters: Optional additional filter conditions
+
+        Returns:
+            Count of nodes
+        """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         await self.connect()
 
-        query = "MATCH (m:Memory) WHERE 1=1"
-        params = {}
+        # CRITICAL: Always start with user filter
+        query = "MATCH (m:Memory {user_id: $user_id}) WHERE 1=1"
+        params = {"user_id": user_id}
 
         if filters:
             if "status" in filters:
@@ -627,17 +829,35 @@ class Neo4jGraphStore(GraphStore):
             record = await result.single()
             return record["count"] if record else 0
 
-    async def count_edges(self, relationship_type: str | None = None) -> int:
-        """Count edges."""
+    async def count_edges(self, user_id: str, relationship_type: str | None = None) -> int:
+        """
+        Count edges with user filtering.
+
+        Args:
+            user_id: User ID for filtering (required)
+            relationship_type: Optional filter by type
+
+        Returns:
+            Count of edges
+        """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         await self.connect()
 
         if relationship_type:
-            query = f"MATCH ()-[r:{relationship_type.upper()}]->() RETURN count(r) as count"
+            query = f"""
+            MATCH (a:Memory {{user_id: $user_id}})-[r:{relationship_type.upper()}]->(b:Memory {{user_id: $user_id}})
+            RETURN count(r) as count
+            """
         else:
-            query = "MATCH ()-[r]->() RETURN count(r) as count"
+            query = """
+            MATCH (a:Memory {user_id: $user_id})-[r]->(b:Memory {user_id: $user_id})
+            RETURN count(r) as count
+            """
 
         async with self.driver.session(database=self.database) as session:
-            result = await session.run(query)
+            result = await session.run(query, {"user_id": user_id})
             record = await result.single()
             return record["count"] if record else 0
 
@@ -649,7 +869,7 @@ class Neo4jGraphStore(GraphStore):
 
     # HELPER METHODS
 
-    def _node_to_memory(self, node) -> Memory:
+    def _node_to_memory(self, node, user_id: str) -> Memory:
         """
         Convert Neo4j minimal node to Memory object.
 
@@ -662,12 +882,17 @@ class Neo4jGraphStore(GraphStore):
         - metadata: Empty dict (stored in vector store)
         - timestamps: Set to epoch/now (stored in vector store)
         - access tracking: Defaults (stored in vector store)
+
+        Args:
+            node: Neo4j node object
+            user_id: User ID from the query context
         """
         return Memory(
             id=node["id"],
             content=node.get("content_preview", ""),  # Preview only
             type=NodeType(node["type"]),
             embedding=[],  # Stored in vector store
+            user_id=node.get("user_id", user_id),  # Use node user_id or fallback to query user_id
             version=node.get("version", 1),
             parent_version=node.get("parent_version"),
             valid_from=datetime.now(),  # Not stored in graph

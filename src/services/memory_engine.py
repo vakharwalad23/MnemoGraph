@@ -118,6 +118,7 @@ class MemoryEngine:
     async def add_memory(
         self,
         content: str,
+        user_id: str,
         metadata: dict[str, Any] | None = None,
         memory_type: NodeType = NodeType.MEMORY,
     ) -> tuple[Memory, RelationshipBundle]:
@@ -126,22 +127,25 @@ class MemoryEngine:
 
         Args:
             content: Memory content
-            metadata: Optional metadata
+            user_id: User ID for multi-user isolation (required)
+            metadata: Optional metadata (user_id should not be in metadata, use parameter instead)
             memory_type: Type of memory node
 
         Returns:
             Tuple of (Memory, RelationshipBundle)
         Raises:
-            ValidationError: If content is invalid
+            ValidationError: If content or user_id is invalid
             EmbeddingError: If embedding generation fails
             MemoryError: If memory creation fails
         """
         if not content or not content.strip():
             raise ValidationError("Memory content cannot be empty")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
         logger.info(
             f"Adding memory: {content[:50]}",
-            extra={"operation": "add_memory", "memory_type": memory_type.value},
+            extra={"operation": "add_memory", "memory_type": memory_type.value, "user_id": user_id},
         )
 
         try:
@@ -156,12 +160,13 @@ class MemoryEngine:
             raise EmbeddingError(f"Failed to generate embedding: {e}") from e
 
         try:
-            # Create memory object
+            # Create memory object with user_id as explicit parameter
             memory = Memory(
                 id=self._generate_id(),
                 content=content,
                 type=memory_type,
                 embedding=embedding,
+                user_id=user_id,
                 metadata=metadata or {},
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
@@ -197,6 +202,7 @@ class MemoryEngine:
     async def get_memory(
         self,
         memory_id: str,
+        user_id: str,
         validate: bool = True,
         track_access: bool = True,
         include_relationships: bool = False,
@@ -207,6 +213,7 @@ class MemoryEngine:
 
         Args:
             memory_id: Memory identifier
+            user_id: User ID for filtering (required)
             validate: Whether to check validity on access
             track_access: Whether to track this access (increments access_count)
             include_relationships: Whether to include relationship data in metadata
@@ -216,16 +223,20 @@ class MemoryEngine:
             Memory or None if not found
 
         Raises:
-            ValidationError: If memory_id is invalid
+            ValidationError: If memory_id or user_id is invalid
+            SecurityError: If memory belongs to a different user
             VectorStoreError: If vector store operation fails
             MemoryError: If unexpected error occurs
         """
         if not memory_id:
             raise ValidationError("memory_id is required")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
         try:
             memory = await self.memory_store.get_memory(
                 memory_id=memory_id,
+                user_id=user_id,
                 track_access=track_access,
                 include_relationships=include_relationships,
                 relationship_limit=relationship_limit,
@@ -253,13 +264,14 @@ class MemoryEngine:
             raise MemoryError(f"Failed to get memory: {e}") from e
 
     async def update_memory(
-        self, memory_id: str, new_content: str
+        self, memory_id: str, user_id: str, new_content: str
     ) -> tuple[Memory, MemoryEvolution]:
         """
         Update memory with versioning.
 
         Args:
             memory_id: Memory to update
+            user_id: User ID for filtering (required)
             new_content: New content
 
         Returns:
@@ -267,21 +279,27 @@ class MemoryEngine:
         Raises:
             ValidationError: If inputs are invalid
             NotFoundError: If memory not found
+            SecurityError: If memory belongs to a different user
             MemoryError: If update fails
         """
         if not memory_id:
             raise ValidationError("memory_id is required")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
         if not new_content or not new_content.strip():
             raise ValidationError("new_content cannot be empty")
 
         logger.info(
             f"Updating memory: {memory_id}",
-            extra={"memory_id": memory_id, "operation": "update_memory"},
+            extra={"memory_id": memory_id, "user_id": user_id, "operation": "update_memory"},
         )
 
         try:
             current = await self.memory_store.get_memory(
-                memory_id=memory_id, track_access=False, include_relationships=False
+                memory_id=memory_id,
+                user_id=user_id,
+                track_access=False,
+                include_relationships=False,
             )
             if not current:
                 raise NotFoundError(f"Memory not found: {memory_id}")
@@ -290,7 +308,10 @@ class MemoryEngine:
 
             if evolution.new_version:
                 new_memory = await self.memory_store.get_memory(
-                    memory_id=evolution.new_version, track_access=False, include_relationships=False
+                    memory_id=evolution.new_version,
+                    user_id=user_id,
+                    track_access=False,
+                    include_relationships=False,
                 )
                 logger.info(
                     "Memory updated with new version",
@@ -299,7 +320,10 @@ class MemoryEngine:
                 return new_memory, evolution
 
             updated_memory = await self.memory_store.get_memory(
-                memory_id=memory_id, track_access=False, include_relationships=False
+                memory_id=memory_id,
+                user_id=user_id,
+                track_access=False,
+                include_relationships=False,
             )
             logger.info(
                 f"Memory {evolution.action}",
@@ -321,12 +345,15 @@ class MemoryEngine:
             )
             raise MemoryError(f"Unexpected error updating memory: {e}") from e
 
-    async def update_memory_metadata(self, memory_id: str, new_metadata: dict[str, Any]) -> Memory:
+    async def update_memory_metadata(
+        self, memory_id: str, user_id: str, new_metadata: dict[str, Any]
+    ) -> Memory:
         """
         Update memory metadata.
 
         Args:
             memory_id: Memory to update
+            user_id: User ID for filtering (required)
             new_metadata: New metadata dictionary
 
         Returns:
@@ -335,28 +362,34 @@ class MemoryEngine:
         Raises:
             ValidationError: If inputs are invalid
             NotFoundError: If memory not found
+            SecurityError: If memory belongs to a different user
             MemoryError: If update fails
         """
         if not memory_id:
             raise ValidationError("memory_id is required")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
         if not isinstance(new_metadata, dict):
             raise ValidationError("new_metadata must be a dictionary")
 
         logger.info(
             f"Updating metadata for memory: {memory_id}",
-            extra={"memory_id": memory_id, "operation": "update_metadata"},
+            extra={"memory_id": memory_id, "user_id": user_id, "operation": "update_metadata"},
         )
 
         try:
             memory = await self.memory_store.get_memory(
-                memory_id=memory_id, track_access=False, include_relationships=False
+                memory_id=memory_id,
+                user_id=user_id,
+                track_access=False,
+                include_relationships=False,
             )
             if not memory:
                 raise NotFoundError(f"Memory not found: {memory_id}")
 
             if new_metadata:
                 memory.metadata.update(new_metadata)
-                await self.memory_store.update_memory(memory)
+                await self.memory_store.update_memory(memory, user_id)
 
             logger.info(f"Metadata updated for memory: {memory_id}", extra={"memory_id": memory_id})
 
@@ -377,27 +410,30 @@ class MemoryEngine:
             )
             raise MemoryError(f"Unexpected error updating metadata: {e}") from e
 
-    async def delete_memory(self, memory_id: str) -> None:
+    async def delete_memory(self, memory_id: str, user_id: str) -> None:
         """
         Delete a memory from both stores.
 
         Args:
             memory_id: Memory to delete
+            user_id: User ID for filtering (required)
 
         Raises:
-            ValidationError: If memory_id is invalid
+            ValidationError: If memory_id or user_id is invalid
             MemoryError: If deletion fails
         """
         if not memory_id:
             raise ValidationError("memory_id is required")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
         logger.info(
             f"Deleting memory: {memory_id}",
-            extra={"memory_id": memory_id, "operation": "delete_memory"},
+            extra={"memory_id": memory_id, "user_id": user_id, "operation": "delete_memory"},
         )
 
         try:
-            await self.memory_store.delete_memory(memory_id)
+            await self.memory_store.delete_memory(memory_id, user_id)
 
             logger.info(f"Memory deleted: {memory_id}", extra={"memory_id": memory_id})
 
@@ -417,6 +453,7 @@ class MemoryEngine:
     async def search_similar(
         self,
         query: str,
+        user_id: str,
         limit: int = 10,
         filters: dict[str, Any] | None = None,
         score_threshold: float | None = None,
@@ -427,6 +464,7 @@ class MemoryEngine:
 
         Args:
             query: Query text
+            user_id: User ID for filtering (required)
             limit: Maximum results
             filters: Optional filters (status, type, etc.)
             score_threshold: Minimum similarity score
@@ -436,11 +474,20 @@ class MemoryEngine:
             List of (Memory, score) tuples
 
         Raises:
+            ValidationError: If user_id is not provided
             EmbeddingError: If embedding generation fails
             VectorStoreError: If search fails
         """
+        if not user_id:
+            raise ValidationError("user_id is required for search")
+
         try:
             query_embedding = await self.embedder.embed(query)
+
+            # Auto-inject user_id filter
+            if filters is None:
+                filters = {}
+            filters["user_id"] = user_id
 
             results = await self.memory_store.search_similar(
                 query_embedding=query_embedding,
@@ -461,6 +508,7 @@ class MemoryEngine:
 
     async def query_memories(
         self,
+        user_id: str,
         filters: dict[str, Any] | None = None,
         order_by: str | None = None,
         limit: int = 100,
@@ -469,14 +517,22 @@ class MemoryEngine:
         Query memories from graph store with filters.
 
         Args:
+            user_id: User ID for filtering (required)
             filters: Filter conditions
             order_by: Sort order
             limit: Maximum results
 
         Returns:
             List of memories
+
+        Raises:
+            ValidationError: If user_id is not provided
         """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         return await self.graph_store.query_memories(
+            user_id=user_id,
             filters=filters,
             order_by=order_by,
             limit=limit,
@@ -485,6 +541,7 @@ class MemoryEngine:
     async def get_neighbors(
         self,
         memory_id: str,
+        user_id: str,
         relationship_types: list[str] | None = None,
         direction: str = "outgoing",
         depth: int = 1,
@@ -496,6 +553,7 @@ class MemoryEngine:
 
         Args:
             memory_id: Starting memory
+            user_id: User ID for filtering (required)
             relationship_types: Filter by types
             direction: "outgoing", "incoming", or "both"
             depth: Traversal depth
@@ -506,12 +564,16 @@ class MemoryEngine:
             List of tuples with (Memory, Edge) - memories are fetched from vector store
 
         Raises:
-            ValidationError: If memory_id is invalid
+            ValidationError: If memory_id or user_id is invalid
             GraphStoreError: If graph traversal fails
             VectorStoreError: If memory fetch fails
         """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         return await self.memory_store.get_neighbors(
             memory_id=memory_id,
+            user_id=user_id,
             relationship_types=relationship_types,
             direction=direction,
             depth=depth,
@@ -519,108 +581,136 @@ class MemoryEngine:
             track_access=track_access,
         )
 
-    async def find_path(self, start_id: str, end_id: str, max_depth: int = 5) -> list[str] | None:
+    async def find_path(
+        self, start_id: str, end_id: str, user_id: str, max_depth: int = 5
+    ) -> list[str] | None:
         """
         Find path between two memories.
 
         Args:
             start_id: Start memory ID
             end_id: End memory ID
+            user_id: User ID for filtering (required)
             max_depth: Maximum path length
 
         Returns:
             List of memory IDs forming path, or None
 
         Raises:
-            ValidationError: If start_id or end_id is invalid
+            ValidationError: If start_id, end_id, or user_id is invalid
             GraphStoreError: If path finding fails
         """
-        return await self.memory_store.find_path(start_id, end_id, max_depth)
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
-    async def get_version_history(self, memory_id: str) -> VersionChain:
+        return await self.memory_store.find_path(start_id, end_id, user_id, max_depth)
+
+    async def get_version_history(self, memory_id: str, user_id: str) -> VersionChain:
         """
         Get complete version history for a memory.
 
         Args:
             memory_id: Memory ID
+            user_id: User ID for filtering (required)
 
         Returns:
             VersionChain object
         """
-        return await self.evolution.get_version_history(memory_id)
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
-    async def rollback_to_version(self, version_id: str) -> Memory:
+        return await self.evolution.get_version_history(memory_id, user_id)
+
+    async def rollback_to_version(self, version_id: str, user_id: str) -> Memory:
         """
         Rollback to a previous version.
 
         Args:
             version_id: Version to rollback to
+            user_id: User ID for filtering (required)
 
         Returns:
             New memory with rolled back content
         """
-        return await self.evolution.rollback_to_version(version_id)
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
-    async def time_travel_query(self, query: str, as_of: datetime, limit: int = 10) -> list[Memory]:
+        return await self.evolution.rollback_to_version(version_id, user_id)
+
+    async def time_travel_query(
+        self, query: str, as_of: datetime, user_id: str, limit: int = 10
+    ) -> list[Memory]:
         """
         Query memories as they existed at a point in time.
 
         Args:
             query: Query text
             as_of: Point in time
+            user_id: User ID for filtering (required)
             limit: Maximum results
 
         Returns:
             List of memories valid at that time
         """
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+
         query_embedding = await self.embedder.embed(query)
 
-        return await self.evolution.time_travel_query(query_embedding, as_of, limit)
+        return await self.evolution.time_travel_query(query_embedding, as_of, user_id, limit)
 
-    async def check_memory_validity(self, memory_id: str) -> InvalidationResult:
+    async def check_memory_validity(self, memory_id: str, user_id: str) -> InvalidationResult:
         """
         Check if a memory is still valid.
 
         Args:
             memory_id: Memory to check
+            user_id: User ID for filtering (required)
 
         Returns:
             InvalidationResult
 
         Raises:
-            ValidationError: If memory_id is invalid
+            ValidationError: If memory_id or user_id is invalid
             NotFoundError: If memory not found
+            SecurityError: If memory belongs to a different user
         """
         if not memory_id:
             raise ValidationError("memory_id is required")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
         memory = await self.memory_store.get_memory(
-            memory_id=memory_id, track_access=False, include_relationships=False
+            memory_id=memory_id, user_id=user_id, track_access=False, include_relationships=False
         )
         if not memory:
             raise NotFoundError(f"Memory not found: {memory_id}")
 
         return await self.invalidation.check_invalidation(memory)
 
-    async def invalidate_memory(self, memory_id: str, reason: str) -> None:
+    async def invalidate_memory(self, memory_id: str, user_id: str, reason: str) -> None:
         """
         Manually invalidate a memory.
 
         Args:
             memory_id: Memory to invalidate
+            user_id: User ID for filtering (required)
             reason: Invalidation reason
 
         Raises:
             ValidationError: If inputs are invalid
             NotFoundError: If memory not found
+            SecurityError: If memory belongs to a different user
         """
         if not memory_id:
             raise ValidationError("memory_id is required")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
         if not reason or not reason.strip():
             raise ValidationError("reason cannot be empty")
 
         memory = await self.memory_store.get_memory(
-            memory_id=memory_id, track_access=False, include_relationships=False
+            memory_id=memory_id, user_id=user_id, track_access=False, include_relationships=False
         )
         if not memory:
             raise NotFoundError(f"Memory not found: {memory_id}")
@@ -638,20 +728,26 @@ class MemoryEngine:
 
     # STATISTICS & MONITORING
 
-    async def get_statistics(self) -> dict[str, Any]:
+    async def get_statistics(self, user_id: str) -> dict[str, Any]:
         """
         Get memory engine statistics.
+
+        Args:
+            user_id: User ID for filtering (required)
 
         Returns:
             Statistics dictionary
         """
-        active_count = await self.graph_store.count_nodes({"status": "active"})
-        historical_count = await self.graph_store.count_nodes({"status": "historical"})
-        superseded_count = await self.graph_store.count_nodes({"status": "superseded"})
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
-        total_edges = await self.graph_store.count_edges()
+        active_count = await self.graph_store.count_nodes(user_id, {"status": "active"})
+        historical_count = await self.graph_store.count_nodes(user_id, {"status": "historical"})
+        superseded_count = await self.graph_store.count_nodes(user_id, {"status": "superseded"})
 
-        vector_count = await self.vector_store.count_memories()
+        total_edges = await self.graph_store.count_edges(user_id)
+
+        vector_count = await self.vector_store.count_memories({"user_id": user_id})
 
         return {
             "memories": {

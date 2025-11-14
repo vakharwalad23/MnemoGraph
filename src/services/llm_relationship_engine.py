@@ -114,7 +114,7 @@ class LLMRelationshipEngine:
         for rel in extraction.relationships:
             if rel.confidence >= min_confidence:
                 edge = self._create_edge_from_relationship(memory.id, rel)
-                edge_tasks.append(self.memory_store.add_relationship(edge))
+                edge_tasks.append(self.memory_store.add_relationship(edge, memory.user_id))
 
         if edge_tasks:
             results = await asyncio.gather(*edge_tasks, return_exceptions=True)
@@ -163,6 +163,7 @@ class LLMRelationshipEngine:
 You are a memory relationship extraction system. Analyze this new memory and identify ALL relevant relationships.
 
 ## New Memory
+ID: {memory.id}
 Content: {memory.content}
 Created: {memory.created_at}
 Type: {memory.type.value}
@@ -368,6 +369,7 @@ Begin extraction:
                     content=insight.content,
                     type=NodeType.DERIVED,
                     embedding=embedding,
+                    user_id=source_memory.user_id,  # Derived memories belong to same user
                     metadata={
                         "confidence": insight.confidence,
                         "reasoning": insight.reasoning,
@@ -388,7 +390,8 @@ Begin extraction:
                             type=RelationshipType.DERIVED_FROM,
                             confidence=insight.confidence,
                             metadata={"confidence": insight.confidence},
-                        )
+                        ),
+                        source_memory.user_id,  # Pass user_id for relationship creation
                     )
 
                 logger.debug(f"Created derived memory: {derived_id[:8]}")

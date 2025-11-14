@@ -138,6 +138,7 @@ class MultiStageFilter:
                 query_embedding=memory.embedding,
                 limit=100,
                 filters={
+                    "user_id": memory.user_id,
                     "status": ["active", "historical"],
                     "created_after": (datetime.now() - timedelta(days=90)).isoformat(),
                 },
@@ -198,6 +199,7 @@ class MultiStageFilter:
                 query_embedding=memory.embedding,
                 limit=20,
                 filters={
+                    "user_id": memory.user_id,
                     "status": ["active"],
                     "created_after": cutoff.isoformat(),
                 },
@@ -224,6 +226,7 @@ class MultiStageFilter:
         try:
             neighbors = await self.memory_store.get_neighbors(
                 memory_id=memory.id,
+                user_id=memory.user_id,
                 depth=depth,
                 relationship_types=[
                     "SIMILAR_TO",
@@ -299,6 +302,7 @@ Return a JSON object with a list of up to 5 key entities.
             conversation_id = memory.metadata["conversation_id"]
 
             results = await self.memory_store.graph_store.query_memories(
+                user_id=memory.user_id,
                 filters={"metadata.conversation_id": conversation_id},
                 order_by="created_at DESC",
                 limit=10,

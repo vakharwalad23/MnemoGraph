@@ -188,6 +188,13 @@ class QdrantStore(VectorStore):
                     field_name="created_at",
                     field_schema="datetime",
                 )
+
+                # CRITICAL: User index for fast filtering
+                await self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="user_id",
+                    field_schema="keyword",
+                )
         except Exception as e:
             logger.error(
                 f"Failed to initialize Qdrant collection: {e}",
@@ -210,6 +217,7 @@ class QdrantStore(VectorStore):
             "content": memory.content,
             "type": memory.type.value,
             "status": memory.status.value,
+            "user_id": memory.user_id,
             "version": memory.version,
             "parent_version": memory.parent_version,
             "valid_from": memory.valid_from.isoformat(),
@@ -240,6 +248,7 @@ class QdrantStore(VectorStore):
             content=payload["content"],
             type=NodeType(payload["type"]),
             embedding=vector,
+            user_id=payload["user_id"],
             version=payload.get("version", 1),
             parent_version=payload.get("parent_version"),
             valid_from=datetime.fromisoformat(payload["valid_from"]),
@@ -387,6 +396,15 @@ class QdrantStore(VectorStore):
                     )
                 )
 
+            # User filter - CRITICAL for multi-user isolation
+            if "user_id" in filters:
+                conditions.append(
+                    FieldCondition(
+                        key="user_id",
+                        match=MatchValue(value=filters["user_id"]),
+                    )
+                )
+
             # Date range filter
             if "created_after" in filters:
                 conditions.append(
@@ -431,7 +449,7 @@ class QdrantStore(VectorStore):
         Search by payload/metadata filters.
 
         Args:
-            filter: Payload filter conditions
+            filter: Payload filter conditions (must include user_id for security)
             limit: Maximum results
 
         Returns:
@@ -476,6 +494,87 @@ class QdrantStore(VectorStore):
             )
 
         return results
+
+    # INTERNAL METHODS FOR BACKGROUND OPERATIONS
+    # These methods bypass user_id filtering and should ONLY be used by internal services
+    # (e.g., background workers, admin operations). They maintain security by ensuring
+    # all returned memories still have valid user_id values.
+
+    async def _search_by_payload_all_users(
+        self, filter: dict[str, Any] | None = None, limit: int = 100, order_by: str | None = None
+    ) -> list[Memory]:
+        """
+        INTERNAL: Search memories across all users by payload filters.
+
+        WARNING: This method bypasses user_id filtering and should ONLY be used
+        by internal services (background workers, admin operations).
+
+        Args:
+            filter: Optional payload filter conditions (user_id will be ignored)
+            limit: Maximum results
+            order_by: Sort order (e.g., "created_at") - supports ASC/DESC
+
+        Returns:
+            List of memories from all users
+        """
+        await self.connect()
+
+        # Build filter conditions (excluding user_id if present)
+        conditions = []
+        if filter:
+            for key, value in filter.items():
+                # Skip user_id filter for internal queries
+                if key == "user_id":
+                    continue
+                if "$contains" in str(value):
+                    # Handle contains operations
+                    continue
+                conditions.append(
+                    FieldCondition(
+                        key=key,
+                        match=MatchValue(value=value),
+                    )
+                )
+
+        query_filter = Filter(must=conditions) if conditions else None
+
+        # Scroll through results (no vector search)
+        # Note: Qdrant scroll doesn't support order_by directly, we'll sort in Python if needed
+        response = await self.client.scroll(
+            collection_name=self.collection_name,
+            scroll_filter=query_filter,
+            limit=limit,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        # Convert to Memory objects
+        memories = []
+        for point in response[0]:  # response is tuple (points, next_offset)
+            memory = self._payload_to_memory(point.payload, point.vector)
+            # Only include memories with valid user_id
+            if memory.user_id:
+                memories.append(memory)
+
+        # Sort in Python if order_by specified
+        if order_by:
+            reverse = False
+            if " DESC" in order_by:
+                reverse = True
+                order_by = order_by.replace(" DESC", "").strip()
+            elif " ASC" in order_by:
+                order_by = order_by.replace(" ASC", "").strip()
+
+            if hasattr(Memory, order_by) or order_by in ["created_at", "updated_at"]:
+                try:
+                    memories.sort(
+                        key=lambda m: getattr(m, order_by, datetime.min) or datetime.min,
+                        reverse=reverse,
+                    )
+                except Exception:
+                    logger.warning(f"Failed to sort by {order_by}, returning unsorted results")
+
+        return memories[:limit]
 
     async def get_memory(self, memory_id: str) -> Memory | None:
         """
