@@ -23,6 +23,7 @@ MnemoGraph is a memory management system that leverages Large Language Models to
 - **⚡ Atomic Access Tracking**: Automatic, consistent access pattern tracking
 - **🛡️ Robust Error Handling**: Comprehensive exception hierarchy and structured logging
 - **💡 Derived Insights**: Discovers patterns across memories
+- **👥 Multi-User Isolation**: Strict user_id-based data isolation in all operations
 - **⚡ REST API**: FastAPI with automatic OpenAPI docs
 
 ---
@@ -123,10 +124,12 @@ graph TB
   - All metadata and timestamps
   - Embeddings for semantic search
   - Access tracking (access_count, last_accessed)
+  - `user_id` in payload for multi-user isolation
 - **Graph Store**: Minimal nodes for relationships
   - Only stores: id, content_preview, type, status, version info
   - Full relationship data (edges with metadata)
   - Graph traversal and queries
+  - `user_id` property on nodes for multi-user isolation
 
 **🤖 LLM Relationship Engine**
 
@@ -269,15 +272,15 @@ Access at:
 
 ### REST API Endpoints
 
-| Method   | Endpoint           | Description       |
-| -------- | ------------------ | ----------------- |
-| `POST`   | `/memories`        | Add memory        |
-| `GET`    | `/memories/{id}`   | Get memory        |
-| `PUT`    | `/memories/{id}`   | Update memory     |
-| `DELETE` | `/memories/{id}`   | Delete memory     |
-| `POST`   | `/memories/search` | Semantic search   |
-| `GET`    | `/stats`           | System statistics |
-| `GET`    | `/health`          | Health check      |
+| Method   | Endpoint           | Description                                      |
+| -------- | ------------------ | ------------------------------------------------ |
+| `POST`   | `/memories`        | Add memory (requires `user_id`)                  |
+| `GET`    | `/memories/{id}`   | Get memory (requires `user_id` parameter)        |
+| `PUT`    | `/memories/{id}`   | Update memory (requires `user_id` parameter)     |
+| `DELETE` | `/memories/{id}`   | Delete memory (requires `user_id` parameter)     |
+| `POST`   | `/memories/search` | Semantic search (requires `user_id` in body)     |
+| `GET`    | `/stats`           | System statistics (requires `user_id` parameter) |
+| `GET`    | `/health`          | Health check                                     |
 
 ---
 
