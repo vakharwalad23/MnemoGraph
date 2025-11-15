@@ -149,7 +149,7 @@ class GraphStore(ABC):
 
     @abstractmethod
     async def get_edge_between(
-        self, source_id: str, target_id: str, relationship_type: str | None = None
+        self, source_id: str, target_id: str, user_id: str, relationship_type: str | None = None
     ) -> dict[str, Any] | None:
         """
         Find edge between two nodes.
@@ -157,6 +157,7 @@ class GraphStore(ABC):
         Args:
             source_id: Source node ID
             target_id: Target node ID
+            user_id: User ID for filtering (required)
             relationship_type: Optional filter by type
 
         Returns:

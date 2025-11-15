@@ -343,6 +343,7 @@ Respond with JSON:
 Analyze this memory for relevance and validity.
 
 Memory:
+ID: {memory.id}
 Content: {memory.content}
 Created: {memory.created_at.strftime('%Y-%m-%d %H:%M:%S')} ({memory.age_days()} days ago)
 Last accessed: {memory.last_accessed.strftime('%Y-%m-%d %H:%M:%S') if memory.last_accessed else 'Never'}
