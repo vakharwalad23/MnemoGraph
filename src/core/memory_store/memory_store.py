@@ -106,8 +106,7 @@ class MemoryStore:
             # Validate user ownership
             if memory.user_id != user_id:
                 raise SecurityError(
-                    f"Memory {memory_id} belongs to user {memory.user_id}, "
-                    f"not the requested user {user_id}"
+                    f"Access denied: Memory {memory_id} does not belong to the requesting user"
                 )
 
             # Track access if requested
@@ -118,8 +117,7 @@ class MemoryStore:
                 # Re-validate ownership after reload
                 if memory and memory.user_id != user_id:
                     raise SecurityError(
-                        f"Memory {memory_id} belongs to user {memory.user_id}, "
-                        f"not the requested user {user_id}"
+                        f"Access denied: Memory {memory_id} does not belong to the requesting user"
                     )
 
             # Optionally enrich with relationships from graph
@@ -237,8 +235,7 @@ class MemoryStore:
             raise ValidationError("Memory must have user_id")
         if memory.user_id != user_id:
             raise SecurityError(
-                f"Memory {memory.id} belongs to user {memory.user_id}, "
-                f"not the requested user {user_id}"
+                f"Access denied: Memory {memory.id} does not belong to the requesting user"
             )
 
         logger.info(
@@ -253,8 +250,7 @@ class MemoryStore:
                 raise NotFoundError(f"Memory not found: {memory.id}")
             if existing_memory.user_id != user_id:
                 raise SecurityError(
-                    f"Memory {memory.id} belongs to user {existing_memory.user_id}, "
-                    f"not the requested user {user_id}"
+                    f"Access denied: Memory {memory.id} does not belong to the requesting user"
                 )
 
             # Update timestamp
@@ -353,8 +349,7 @@ class MemoryStore:
                 raise NotFoundError(f"Memory not found: {memory_id}")
             if memory.user_id != user_id:
                 raise SecurityError(
-                    f"Memory {memory_id} belongs to user {memory.user_id}, "
-                    f"not the requested user {user_id}"
+                    f"Access denied: Memory {memory_id} does not belong to the requesting user"
                 )
 
             # Delete from vector store (source of truth)
