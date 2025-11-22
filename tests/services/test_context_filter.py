@@ -4,10 +4,21 @@ Tests for MultiStageFilter service.
 Tests context gathering, filtering, and LLM pre-filtering.
 """
 
+from pathlib import Path
+
 import pytest
 
+from src.config import Config
 from src.models.memory import Memory, MemoryStatus, NodeType
 from src.services.context_filter import MultiStageFilter
+
+
+def get_test_config() -> Config:
+    """Get test configuration."""
+    env_test_path = Path(".env.test")
+    if env_test_path.exists():
+        return Config.from_env(env_file=env_test_path)
+    return Config.from_env()
 
 
 @pytest.mark.unit
@@ -52,6 +63,9 @@ class TestMultiStageFilterUnit:
 
         assert isinstance(results, list)
         assert all(isinstance(m, Memory) for m in results)
+        # Verify all results belong to the same user
+        for mem in results:
+            assert mem.user_id == sample_memory.user_id
 
     async def test_temporal_filter(
         self,
@@ -68,17 +82,18 @@ class TestMultiStageFilterUnit:
             config=config,
         )
 
-        # Add memories to graph store
+        # Add memories to both stores
         for mem in sample_memories:
-            await memory_store.graph_store.add_node(mem)
+            await memory_store.create_memory(mem)
 
         # Test temporal filter
         results = await filter_service._temporal_filter(sample_memory)
 
         assert isinstance(results, list)
-        # Results should be recent active memories
+        # Results should be recent active memories and belong to same user
         for mem in results:
             assert mem.status == MemoryStatus.ACTIVE
+            assert mem.user_id == sample_memory.user_id
 
     async def test_graph_filter_no_neighbors(self, memory_store, mock_llm, config, sample_memory):
         """Test graph filter when memory has no neighbors."""
@@ -134,25 +149,32 @@ class TestMultiStageFilterUnit:
         )
 
         # Create memories in same conversation
+        # Use same dimension as sample_memories fixture
+        test_config = get_test_config()
+        dim = test_config.embedder.dimension if test_config.embedder.dimension else 768
+
+        user_id = "test_user_001"
         conv_memories = [
             Memory(
                 id=f"conv_mem_{i}",
                 content=f"Message {i}",
                 type=NodeType.MEMORY,
-                embedding=[0.1 * i] * 16,
+                user_id=user_id,
+                embedding=[0.1 * i] * dim,
                 metadata={"conversation_id": "conv_123"},
             )
             for i in range(3)
         ]
 
         for mem in conv_memories:
-            await memory_store.graph_store.add_node(mem)
+            await memory_store.create_memory(mem)
 
         # Test with conversation memory
         test_memory = Memory(
             id="test_conv_mem",
             content="New message",
             type=NodeType.MEMORY,
+            user_id=user_id,  # Same user for conversation
             embedding=[0.5] * 768,
             metadata={"conversation_id": "conv_123"},
         )
@@ -160,8 +182,10 @@ class TestMultiStageFilterUnit:
         results = await filter_service._conversation_filter(test_memory)
 
         assert isinstance(results, list)
-        # Should find other memories in conversation
+        # Should find other memories in conversation and same user
         assert len(results) <= 10
+        for mem in results:
+            assert mem.user_id == user_id
 
     async def test_deduplicate(self, memory_store, mock_llm, config, sample_memories):
         """Test deduplication of memories."""
@@ -225,8 +249,7 @@ class TestMultiStageFilterNeo4j:
 
         # Setup data
         for mem in sample_memories:
-            await memory_store.vector_store.upsert_memory(mem)
-            await memory_store.graph_store.add_node(mem)
+            await memory_store.create_memory(mem)
 
         # Gather context
         context = await filter_service.gather_context(sample_memory)
@@ -235,6 +258,9 @@ class TestMultiStageFilterNeo4j:
         assert hasattr(context, "vector_candidates")
         assert hasattr(context, "filtered_candidates")
         assert isinstance(context.filtered_candidates, list)
+        # Verify all candidates belong to the same user
+        for mem in context.filtered_candidates:
+            assert mem.user_id == sample_memory.user_id
 
     async def test_graph_filter_with_neighbors_neo4j(
         self, memory_store, mock_llm, config, sample_memories
@@ -247,18 +273,20 @@ class TestMultiStageFilterNeo4j:
         )
 
         # Add memories and create edges
+        user_id = sample_memories[0].user_id
         for mem in sample_memories:
-            await memory_store.graph_store.add_node(mem)
+            await memory_store.create_memory(mem)
 
         # Create some edges
-        await memory_store.graph_store.add_edge(
-            {
-                "source": sample_memories[0].id,
-                "target": sample_memories[1].id,
-                "type": "SIMILAR_TO",
-                "metadata": {"confidence": 0.8},
-            }
+        from src.models.relationships import Edge, RelationshipType
+
+        edge = Edge(
+            source=sample_memories[0].id,
+            target=sample_memories[1].id,
+            type=RelationshipType.SIMILAR_TO,
+            metadata={"confidence": 0.8},
         )
+        await memory_store.graph_store.add_edge(edge, user_id)
 
         # Test graph filter
         results = await filter_service._graph_filter(sample_memories[0])

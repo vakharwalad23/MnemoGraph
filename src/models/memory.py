@@ -54,6 +54,9 @@ class Memory(BaseModel):
     type: NodeType = NodeType.MEMORY
     embedding: list[float] = Field(default_factory=list)
 
+    # Multi-user isolation
+    user_id: str
+
     # Versioning
     version: int = 1
     parent_version: str | None = None

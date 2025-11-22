@@ -94,7 +94,8 @@ class MemoryEvolutionService:
             current.updated_at = datetime.now()
 
             # Update via MemoryStore (handles both stores)
-            await self.memory_store.update_memory(current)
+            # Note: new_version.user_id is already set in _create_new_version
+            await self.memory_store.update_memory(current, current.user_id)
             await self.memory_store.create_memory(new_version)
 
             return MemoryEvolution(
@@ -119,7 +120,7 @@ class MemoryEvolutionService:
             current.updated_at = datetime.now()
 
             # Update via MemoryStore (handles both stores)
-            await self.memory_store.update_memory(current)
+            await self.memory_store.update_memory(current, current.user_id)
 
             return MemoryEvolution(
                 current_version=current.id,
@@ -145,6 +146,7 @@ class MemoryEvolutionService:
                 content=new_info,
                 type=current.type,
                 embedding=new_embedding,
+                user_id=current.user_id,  # Preserved memory belongs to same user
                 status=MemoryStatus.ACTIVE,
                 metadata={
                     "preserve_alongside": current.id,
@@ -236,6 +238,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             content=new_content,
             type=current.type,
             embedding=embedding,
+            user_id=current.user_id,  # New version belongs to same user
             version=current.version + 1,
             parent_version=current.id,
             valid_from=datetime.now(),
@@ -254,7 +257,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
 
         return new_version
 
-    async def get_version_history(self, memory_id: str) -> VersionChain:
+    async def get_version_history(self, memory_id: str, user_id: str) -> VersionChain:
         """
         Get complete version history for a memory.
 
@@ -262,6 +265,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
 
         Args:
             memory_id: Memory ID to get history for
+            user_id: User ID for filtering (required)
 
         Returns:
             Complete version chain
@@ -272,7 +276,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
 
         # Walk backwards through versions
         while current_id:
-            memory = await self.memory_store.get_memory(current_id, track_access=False)
+            memory = await self.memory_store.get_memory(current_id, user_id, track_access=False)
             if not memory:
                 break
             versions.append(
@@ -309,6 +313,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
         self,
         query_embedding: list[float] | None,
         as_of: datetime,
+        user_id: str,
         limit: int = 10,
         use_semantic_search: bool = True,
     ) -> list[Memory]:
@@ -320,6 +325,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
         Args:
             query_embedding: Query vector for semantic search. If None, falls back to temporal-only.
             as_of: Point in time to query
+            user_id: User ID for filtering (required)
             limit: Maximum results
             use_semantic_search: Enable semantic similarity search (requires query_embedding and vector_store)
 
@@ -332,6 +338,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             similar_results = await self.memory_store.search_similar(
                 query_embedding=query_embedding,
                 limit=limit * 5,  # Get more candidates for temporal filtering
+                filters={"user_id": user_id},
                 track_access=False,
             )
 
@@ -354,6 +361,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
         }
 
         candidates = await self.memory_store.graph_store.query_memories(
+            user_id=user_id,
             filters=filters,
             order_by="created_at DESC",
             limit=limit * 3,
@@ -371,7 +379,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
 
         return valid_memories[:limit]
 
-    async def get_current_version(self, memory_id: str) -> Memory:
+    async def get_current_version(self, memory_id: str, user_id: str) -> Memory:
         """
         Get the current (latest) version of a memory.
 
@@ -380,22 +388,25 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
 
         Args:
             memory_id: Any version of the memory
+            user_id: User ID for filtering (required)
 
         Returns:
             Current active version
         """
-        memory = await self.memory_store.get_memory(memory_id, track_access=False)
+        memory = await self.memory_store.get_memory(memory_id, user_id, track_access=False)
         if not memory:
             return None
 
         while memory.superseded_by:
-            memory = await self.memory_store.get_memory(memory.superseded_by, track_access=False)
+            memory = await self.memory_store.get_memory(
+                memory.superseded_by, user_id, track_access=False
+            )
             if not memory:
                 break
 
         return memory
 
-    async def rollback_to_version(self, target_version_id: str) -> Memory:
+    async def rollback_to_version(self, target_version_id: str, user_id: str) -> Memory:
         """
         Rollback to a previous version.
 
@@ -403,17 +414,18 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
 
         Args:
             target_version_id: Version to rollback to
+            user_id: User ID for filtering (required)
 
         Returns:
             New memory with rolled back content
         """
         # Get target version
-        target = await self.memory_store.get_memory(target_version_id, track_access=False)
+        target = await self.memory_store.get_memory(target_version_id, user_id, track_access=False)
         if not target:
             raise ValueError(f"Target version not found: {target_version_id}")
 
         # Get current version
-        current = await self.get_current_version(target_version_id)
+        current = await self.get_current_version(target_version_id, user_id)
 
         # Create new version with target's content
         new_version = Memory(
@@ -421,6 +433,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
             content=target.content,
             type=target.type,
             embedding=target.embedding,
+            user_id=user_id,  # Rollback belongs to same user
             version=current.version + 1,
             parent_version=current.id,
             valid_from=datetime.now(),
@@ -442,7 +455,7 @@ All fields are REQUIRED. The confidence must be a number between 0.0 and 1.0.
         current.invalidation_reason = f"Rolled back to version {target.version}"
 
         # Update via MemoryStore (handles both stores)
-        await self.memory_store.update_memory(current)
+        await self.memory_store.update_memory(current, user_id)
         await self.memory_store.create_memory(new_version)
 
         return new_version

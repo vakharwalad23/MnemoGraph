@@ -173,9 +173,10 @@ class TestLLMRelationshipEngineNeo4j:
         assert result.memory_id == sample_memory.id
 
         # Verify memory was added to graph
-        retrieved = await neo4j_graph_store.get_node(sample_memory.id)
+        retrieved = await neo4j_graph_store.get_node(sample_memory.id, sample_memory.user_id)
         assert retrieved is not None
         assert retrieved.id == sample_memory.id
+        assert retrieved.user_id == sample_memory.user_id
 
     async def test_process_with_edges_neo4j(
         self,
@@ -195,8 +196,7 @@ class TestLLMRelationshipEngineNeo4j:
 
         # Add context memories
         for mem in sample_memories[:-1]:
-            await memory_store.graph_store.add_node(mem)
-            await memory_store.vector_store.upsert_memory(mem)
+            await memory_store.create_memory(mem)
 
         # Process new memory
         new_memory = sample_memories[-1]
@@ -204,8 +204,9 @@ class TestLLMRelationshipEngineNeo4j:
 
         assert result is not None
 
-        # Check edges were created
-        edge_count = await memory_store.graph_store.count_edges()
+        # Check edges were created (need user_id)
+        user_id = new_memory.user_id
+        edge_count = await memory_store.graph_store.count_edges(user_id)
         assert edge_count >= 0
 
     async def test_create_derived_memories_neo4j(
@@ -224,7 +225,7 @@ class TestLLMRelationshipEngineNeo4j:
             config=config,
         )
 
-        await memory_store.graph_store.add_node(sample_memory)
+        await memory_store.create_memory(sample_memory)
 
         from src.models.relationships import DerivedInsight
 
@@ -240,8 +241,11 @@ class TestLLMRelationshipEngineNeo4j:
 
         await engine._create_derived_memories(insights, sample_memory)
 
-        # Verify derived memory exists
-        count = await memory_store.graph_store.count_nodes({"type": NodeType.DERIVED.value})
+        # Verify derived memory exists (need user_id)
+        user_id = sample_memory.user_id
+        count = await memory_store.graph_store.count_nodes(
+            user_id, {"type": NodeType.DERIVED.value}
+        )
         assert count > 0
 
 

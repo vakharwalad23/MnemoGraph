@@ -112,3 +112,12 @@ class MemoryError(MnemoGraphError):
     """
 
     pass
+
+
+class SecurityError(MnemoGraphError):
+    """
+    Security-related errors.
+    Raised when security violations are detected (e.g., user boundary violations).
+    """
+
+    pass

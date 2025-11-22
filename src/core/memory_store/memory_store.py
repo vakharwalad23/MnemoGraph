@@ -23,6 +23,8 @@ from src.models.relationships import Edge
 from src.utils.exceptions import (
     GraphStoreError,
     MemoryError,
+    NotFoundError,
+    SecurityError,
     ValidationError,
     VectorStoreError,
 )
@@ -62,6 +64,7 @@ class MemoryStore:
     async def get_memory(
         self,
         memory_id: str,
+        user_id: str,
         track_access: bool = True,
         include_relationships: bool = False,
         relationship_limit: int = 100,
@@ -71,6 +74,7 @@ class MemoryStore:
 
         Args:
             memory_id: Unique identifier for the memory
+            user_id: User ID for filtering (required)
             track_access: Whether to increment access count and update last_accessed
             include_relationships: Whether to include relationship data from graph
             relationship_limit: Maximum number of relationships to include (if include_relationships=True)
@@ -79,11 +83,14 @@ class MemoryStore:
             Memory object if found, None otherwise
 
         Raises:
-            ValidationError: If memory_id is invalid
+            ValidationError: If memory_id or user_id is invalid
+            SecurityError: If memory belongs to a different user
             VectorStoreError: If vector store operation fails
         """
         if not memory_id or not memory_id.strip():
             raise ValidationError("memory_id cannot be empty")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
         try:
             # Get from vector store (source of truth)
@@ -96,17 +103,29 @@ class MemoryStore:
                 )
                 return None
 
+            # Validate user ownership
+            if memory.user_id != user_id:
+                raise SecurityError(
+                    f"Access denied: Memory {memory_id} does not belong to the requesting user"
+                )
+
             # Track access if requested
             if track_access:
                 await self._track_access(memory_id)
                 # Reload to get updated access counts
                 memory = await self.vector_store.get_memory(memory_id)
+                # Re-validate ownership after reload
+                if memory and memory.user_id != user_id:
+                    raise SecurityError(
+                        f"Access denied: Memory {memory_id} does not belong to the requesting user"
+                    )
 
             # Optionally enrich with relationships from graph
             if include_relationships and memory:
                 # Get full relationship details (without tracking access again)
                 neighbors = await self.get_neighbors(
                     memory_id=memory_id,
+                    user_id=memory.user_id,
                     limit=relationship_limit,
                     track_access=False,
                 )
@@ -126,8 +145,8 @@ class MemoryStore:
 
             return memory
 
-        except VectorStoreError:
-            # Let store errors propagate
+        except (VectorStoreError, SecurityError):
+            # Let store errors and security errors propagate
             raise
         except Exception as e:
             logger.error(
@@ -192,29 +211,48 @@ class MemoryStore:
             )
             raise MemoryError(f"Failed to create memory: {e}") from e
 
-    async def update_memory(self, memory: Memory) -> Memory:
+    async def update_memory(self, memory: Memory, user_id: str) -> Memory:
         """
         Update memory in vector store + sync minimal node.
 
         Args:
             memory: Updated memory
+            user_id: User ID for ownership validation (required)
 
         Returns:
             Updated memory
 
         Raises:
-            ValidationError: If memory is invalid
+            ValidationError: If memory or user_id is invalid
+            SecurityError: If memory belongs to a different user
             VectorStoreError: If vector store operation fails
         """
         if not memory.id:
             raise ValidationError("Memory must have id")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
+        if not memory.user_id:
+            raise ValidationError("Memory must have user_id")
+        if memory.user_id != user_id:
+            raise SecurityError(
+                f"Access denied: Memory {memory.id} does not belong to the requesting user"
+            )
 
         logger.info(
             f"Updating memory: {memory.id}",
-            extra={"memory_id": memory.id, "operation": "update_memory"},
+            extra={"memory_id": memory.id, "user_id": user_id, "operation": "update_memory"},
         )
 
         try:
+            # Verify ownership by checking existing memory
+            existing_memory = await self.vector_store.get_memory(memory.id)
+            if not existing_memory:
+                raise NotFoundError(f"Memory not found: {memory.id}")
+            if existing_memory.user_id != user_id:
+                raise SecurityError(
+                    f"Access denied: Memory {memory.id} does not belong to the requesting user"
+                )
+
             # Update timestamp
             memory.updated_at = datetime.now()
 
@@ -224,12 +262,7 @@ class MemoryStore:
                     f"Embedding missing for {memory.id}, attempting to retrieve from vector store",
                     extra={"memory_id": memory.id},
                 )
-                existing_memory = await self.vector_store.get_memory(memory.id)
-                if (
-                    existing_memory
-                    and existing_memory.embedding
-                    and len(existing_memory.embedding) > 0
-                ):
+                if existing_memory.embedding and len(existing_memory.embedding) > 0:
                     memory.embedding = existing_memory.embedding
                     logger.debug(
                         f"Retrieved embedding for {memory.id} from vector store",
@@ -276,8 +309,8 @@ class MemoryStore:
             )
             return memory
 
-        except (ValidationError, VectorStoreError):
-            # Let validation and store errors propagate
+        except (ValidationError, VectorStoreError, SecurityError, NotFoundError):
+            # Let validation, store, security, and not found errors propagate
             raise
         except Exception as e:
             logger.error(
@@ -286,27 +319,39 @@ class MemoryStore:
             )
             raise MemoryError(f"Failed to update memory: {e}") from e
 
-    async def delete_memory(self, memory_id: str) -> None:
+    async def delete_memory(self, memory_id: str, user_id: str) -> None:
         """
         Delete memory from both stores.
 
         Args:
             memory_id: Memory ID to delete
+            user_id: User ID for filtering (required)
 
         Raises:
-            ValidationError: If memory_id is invalid
+            ValidationError: If memory_id or user_id is invalid
             VectorStoreError: If vector store deletion fails
             GraphStoreError: If graph store deletion fails
         """
         if not memory_id or not memory_id.strip():
             raise ValidationError("memory_id cannot be empty")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
         logger.info(
             f"Deleting memory: {memory_id}",
-            extra={"memory_id": memory_id, "operation": "delete_memory"},
+            extra={"memory_id": memory_id, "user_id": user_id, "operation": "delete_memory"},
         )
 
         try:
+            # Verify ownership before deleting (get from vector store - source of truth)
+            memory = await self.vector_store.get_memory(memory_id)
+            if not memory:
+                raise NotFoundError(f"Memory not found: {memory_id}")
+            if memory.user_id != user_id:
+                raise SecurityError(
+                    f"Access denied: Memory {memory_id} does not belong to the requesting user"
+                )
+
             # Delete from vector store (source of truth)
             await self.vector_store.delete_memory(memory_id)
             logger.debug(
@@ -315,7 +360,7 @@ class MemoryStore:
             )
 
             # Delete node and edges from graph store
-            await self.graph_store.delete_node(memory_id)
+            await self.graph_store.delete_node(memory_id, user_id)
             logger.debug(
                 f"Memory node deleted from graph: {memory_id}",
                 extra={"memory_id": memory_id},
@@ -326,8 +371,8 @@ class MemoryStore:
                 extra={"memory_id": memory_id},
             )
 
-        except (VectorStoreError, GraphStoreError):
-            # Let store errors propagate
+        except (VectorStoreError, GraphStoreError, SecurityError):
+            # Let store errors and security errors propagate
             raise
         except Exception as e:
             logger.error(
@@ -339,6 +384,7 @@ class MemoryStore:
     async def get_relationships(
         self,
         memory_id: str,
+        user_id: str,
         relationship_types: list[str] | None = None,
         direction: str = "outgoing",
     ) -> list[Edge]:
@@ -347,6 +393,7 @@ class MemoryStore:
 
         Args:
             memory_id: Memory ID
+            user_id: User ID for filtering (required)
             relationship_types: Filter by specific types
             direction: "outgoing", "incoming", or "both"
 
@@ -354,16 +401,19 @@ class MemoryStore:
             List of edges
 
         Raises:
-            ValidationError: If memory_id is invalid
+            ValidationError: If memory_id or user_id is invalid
             GraphStoreError: If graph store operation fails
         """
         if not memory_id or not memory_id.strip():
             raise ValidationError("memory_id cannot be empty")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
         try:
             # Get neighbors from graph (returns list of tuples)
             neighbors = await self.graph_store.get_neighbors(
                 node_id=memory_id,
+                user_id=user_id,
                 relationship_types=relationship_types,
                 direction=direction,
                 depth=1,
@@ -384,25 +434,28 @@ class MemoryStore:
             )
             raise MemoryError(f"Failed to get relationships: {e}") from e
 
-    async def add_relationship(self, edge: Edge) -> str:
+    async def add_relationship(self, edge: Edge, user_id: str) -> str:
         """
         Add relationship to graph store.
 
         Args:
             edge: Edge to add
+            user_id: User ID for filtering (required)
 
         Returns:
             Edge ID
 
         Raises:
-            ValidationError: If edge is invalid
+            ValidationError: If edge or user_id is invalid
             GraphStoreError: If graph store operation fails
         """
         if not edge.source or not edge.target:
             raise ValidationError("Edge must have source and target")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
         try:
-            edge_id = await self.graph_store.add_edge(edge)
+            edge_id = await self.graph_store.add_edge(edge, user_id)
             logger.debug(
                 f"Relationship added: {edge.source} -> {edge.target}",
                 extra={
@@ -437,7 +490,7 @@ class MemoryStore:
         Args:
             query_embedding: Query embedding vector
             limit: Maximum results
-            filters: Optional filters (status, type, etc.)
+            filters: Optional filters (must include user_id)
             track_access: Whether to track access for results
             score_threshold: Minimum similarity score
 
@@ -445,11 +498,21 @@ class MemoryStore:
             List of (Memory, score) tuples
 
         Raises:
-            ValidationError: If query_embedding is invalid
+            ValidationError: If query_embedding is invalid or user_id is missing from filters
             VectorStoreError: If search operation fails
         """
         if not query_embedding:
             raise ValidationError("query_embedding cannot be empty")
+
+        # Validate user_id is present in filters
+        if not filters or "user_id" not in filters:
+            raise ValidationError(
+                "user_id is required in filters for search_similar. "
+                "This ensures multi-user isolation."
+            )
+        user_id = filters.get("user_id")
+        if not user_id or not str(user_id).strip():
+            raise ValidationError("user_id in filters cannot be empty")
 
         try:
             # Search vector store
@@ -480,6 +543,7 @@ class MemoryStore:
     async def get_neighbors(
         self,
         memory_id: str,
+        user_id: str,
         relationship_types: list[str] | None = None,
         direction: str = "outgoing",
         depth: int = 1,
@@ -491,6 +555,7 @@ class MemoryStore:
 
         Args:
             memory_id: Starting memory ID
+            user_id: User ID for filtering (required)
             relationship_types: Filter by specific types
             direction: "outgoing", "incoming", or "both"
             depth: Traversal depth
@@ -501,12 +566,14 @@ class MemoryStore:
             List of (Memory, Edge) tuples with complete memory data
 
         Raises:
-            ValidationError: If memory_id is invalid
+            ValidationError: If memory_id or user_id is invalid
             GraphStoreError: If graph store operation fails
             VectorStoreError: If vector store operation fails
         """
         if not memory_id or not memory_id.strip():
             raise ValidationError("memory_id cannot be empty")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
         try:
             # Track access for source memory if requested
@@ -516,6 +583,7 @@ class MemoryStore:
             # Get edges from graph store
             neighbors = await self.graph_store.get_neighbors(
                 node_id=memory_id,
+                user_id=user_id,
                 relationship_types=relationship_types,
                 direction=direction,
                 depth=depth,
@@ -545,27 +613,32 @@ class MemoryStore:
             )
             raise MemoryError(f"Failed to get neighbors: {e}") from e
 
-    async def find_path(self, start_id: str, end_id: str, max_depth: int = 5) -> list[str] | None:
+    async def find_path(
+        self, start_id: str, end_id: str, user_id: str, max_depth: int = 5
+    ) -> list[str] | None:
         """
         Find path between two memories in the graph.
 
         Args:
             start_id: Start memory ID
             end_id: End memory ID
+            user_id: User ID for filtering (required)
             max_depth: Maximum path length
 
         Returns:
             List of memory IDs forming path, or None if no path found
 
         Raises:
-            ValidationError: If start_id or end_id is invalid
+            ValidationError: If start_id, end_id, or user_id is invalid
             GraphStoreError: If graph store operation fails
         """
         if not start_id or not end_id:
             raise ValidationError("start_id and end_id are required")
+        if not user_id or not user_id.strip():
+            raise ValidationError("user_id is required")
 
         try:
-            return await self.graph_store.find_path(start_id, end_id, max_depth)
+            return await self.graph_store.find_path(start_id, end_id, user_id, max_depth)
         except GraphStoreError:
             # Let store errors propagate
             raise
@@ -622,22 +695,23 @@ class MemoryStore:
                 extra={"memory_id": memory_id, "error": str(e)},
             )
 
-    async def _get_relationship_summary(self, memory_id: str) -> dict[str, Any]:
+    async def _get_relationship_summary(self, memory_id: str, user_id: str) -> dict[str, Any]:
         """
         Get summary of relationships for a memory.
 
         Args:
             memory_id: Memory ID
+            user_id: User ID for filtering (required)
 
         Returns:
             Dict with relationship counts by type and direction
         """
         try:
             outgoing = await self.graph_store.get_neighbors(
-                node_id=memory_id, direction="outgoing", depth=1, limit=1000
+                node_id=memory_id, user_id=user_id, direction="outgoing", depth=1, limit=1000
             )
             incoming = await self.graph_store.get_neighbors(
-                node_id=memory_id, direction="incoming", depth=1, limit=1000
+                node_id=memory_id, user_id=user_id, direction="incoming", depth=1, limit=1000
             )
 
             return {

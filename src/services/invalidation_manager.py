@@ -83,7 +83,7 @@ class InvalidationManager:
             Updated memory (may have changed status)
         """
         if memory.status != MemoryStatus.ACTIVE:
-            await self.memory_store.update_memory(memory)
+            await self.memory_store.update_memory(memory, memory.user_id)
             return memory
 
         if not self._should_validate(memory):
@@ -95,7 +95,7 @@ class InvalidationManager:
             memory = await self._mark_invalidated(memory, result)
         else:
             memory.metadata["last_validated"] = datetime.now().isoformat()
-            await self.memory_store.update_memory(memory)
+            await self.memory_store.update_memory(memory, memory.user_id)
 
         return memory
 
@@ -149,7 +149,10 @@ class InvalidationManager:
 
     async def _invalidation_worker(self, interval_hours: int):
         """
-        Background worker that periodically validates memories.
+        Background worker that periodically validates memories across all users.
+
+        This worker uses internal methods that bypass user_id filtering to
+        validate memories system-wide. It's intended for maintenance operations.
 
         Args:
             interval_hours: Hours between runs
@@ -184,7 +187,11 @@ class InvalidationManager:
 
     async def _find_validation_candidates(self) -> list[Memory]:
         """
-        Find memories that should be validated.
+        INTERNAL: Find memories that should be validated across all users.
+
+        This method uses internal vector store methods (source of truth) that bypass
+        user_id filtering. It's intended for background worker operations that need
+        to validate memories across the entire system.
 
         Priority:
         1. Old, rarely accessed memories
@@ -192,22 +199,30 @@ class InvalidationManager:
         3. Random sample for maintenance
 
         Returns:
-            List of memories to validate
+            List of memories to validate (from all users)
         """
         candidates = []
 
         try:
-            old_inactive = await self.memory_store.graph_store.query_memories(
-                filters={
-                    "status": MemoryStatus.ACTIVE.value,
-                    "created_before": (datetime.now() - timedelta(days=180)).isoformat(),
-                    "access_count_lt": 5,
-                },
+            # Use vector store as source of truth
+            filters = {
+                "status": MemoryStatus.ACTIVE.value,
+                "created_before": (datetime.now() - timedelta(days=180)).isoformat(),
+            }
+            # Use internal method that queries across all users from vector store
+            old_inactive = await self.memory_store.vector_store._search_by_payload_all_users(
+                filter=filters,
+                order_by="created_at ASC",
                 limit=50,
             )
+
+            # Filter by access_count in Python (if Qdrant doesn't support it)
+            if old_inactive:
+                old_inactive = [m for m in old_inactive if m.access_count < 5]
+
             candidates.extend(old_inactive)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Error finding validation candidates: {e}")
 
         return candidates[:100]
 
@@ -227,7 +242,7 @@ class InvalidationManager:
                 await self._mark_invalidated(memory, result)
             else:
                 memory.metadata["last_validated"] = datetime.now().isoformat()
-                await self.memory_store.update_memory(memory)
+                await self.memory_store.update_memory(memory, memory.user_id)
 
         except Exception as e:
             logger.error(f"Error validating {memory.id}: {e}")
@@ -301,7 +316,7 @@ Respond with JSON:
                     candidate.superseded_by = new_memory.id
                     candidate.invalidation_reason = result.reasoning
 
-                    await self.memory_store.update_memory(candidate)
+                    await self.memory_store.update_memory(candidate, candidate.user_id)
 
                     superseded.append(candidate)
 
@@ -328,6 +343,7 @@ Respond with JSON:
 Analyze this memory for relevance and validity.
 
 Memory:
+ID: {memory.id}
 Content: {memory.content}
 Created: {memory.created_at.strftime('%Y-%m-%d %H:%M:%S')} ({memory.age_days()} days ago)
 Last accessed: {memory.last_accessed.strftime('%Y-%m-%d %H:%M:%S') if memory.last_accessed else 'Never'}
@@ -379,7 +395,7 @@ Respond with JSON:
         memory.updated_at = datetime.now()
 
         # Update via MemoryStore (handles both stores)
-        await self.memory_store.update_memory(memory)
+        await self.memory_store.update_memory(memory, memory.user_id)
 
         return memory
 
@@ -396,6 +412,7 @@ Respond with JSON:
         try:
             neighbors = await self.memory_store.get_neighbors(
                 memory_id=memory.id,
+                user_id=memory.user_id,
                 direction="both",
                 depth=1,
                 limit=5,

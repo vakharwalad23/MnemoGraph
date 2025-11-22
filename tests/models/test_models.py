@@ -34,11 +34,13 @@ class TestMemory:
             id="test_001",
             content="Test memory content",
             type=NodeType.MEMORY,
+            user_id="user_001",
         )
 
         assert memory.id == "test_001"
         assert memory.content == "Test memory content"
         assert memory.type == NodeType.MEMORY
+        assert memory.user_id == "user_001"
         assert memory.status == MemoryStatus.ACTIVE
         assert memory.version == 1
         assert memory.confidence == 1.0
@@ -51,17 +53,20 @@ class TestMemory:
         memory = Memory(
             id="test_002",
             content="Test memory with metadata",
+            user_id="user_001",
             metadata=metadata,
         )
 
         assert memory.metadata == metadata
         assert memory.metadata["source"] == "test"
+        assert memory.user_id == "user_001"
 
     def test_memory_versioning(self):
         """Test memory versioning fields."""
         memory = Memory(
             id="test_003",
             content="Test memory",
+            user_id="user_001",
             version=2,
             parent_version="test_002",
             valid_from=datetime.now(),
@@ -70,6 +75,7 @@ class TestMemory:
 
         assert memory.version == 2
         assert memory.parent_version == "test_002"
+        assert memory.user_id == "user_001"
         assert memory.valid_until is not None
 
     def test_memory_status_transitions(self):
@@ -77,6 +83,7 @@ class TestMemory:
         memory = Memory(
             id="test_004",
             content="Test memory",
+            user_id="user_001",
             status=MemoryStatus.SUPERSEDED,
             superseded_by="test_005",
             invalidation_reason="Updated with new information",
@@ -84,22 +91,28 @@ class TestMemory:
 
         assert memory.status == MemoryStatus.SUPERSEDED
         assert memory.superseded_by == "test_005"
+        assert memory.user_id == "user_001"
         assert memory.invalidation_reason == "Updated with new information"
 
     def test_memory_validation(self):
         """Test memory validation."""
         # Test required fields
         with pytest.raises(ValidationError):
-            Memory(content="Missing ID")
+            Memory(content="Missing ID", user_id="user_001")
 
         with pytest.raises(ValidationError):
-            Memory(id="test")
+            Memory(id="test", user_id="user_001")
+
+        # Test user_id is required
+        with pytest.raises(ValidationError):
+            Memory(id="test_001", content="Test content")
 
     def test_memory_methods(self):
         """Test memory utility methods."""
         memory = Memory(
             id="test_005",
             content="Test memory",
+            user_id="user_001",
             created_at=datetime.now() - timedelta(days=5),
         )
 
@@ -123,6 +136,7 @@ class TestMemory:
         memory = Memory(
             id="test_006",
             content="Test memory",
+            user_id="user_001",
             status=MemoryStatus.INVALIDATED,
             valid_until=datetime.now() - timedelta(days=1),
         )
@@ -483,8 +497,8 @@ class TestContextBundle:
 
     def test_context_bundle_creation(self):
         """Test basic context bundle creation."""
-        memory1 = Memory(id="mem_001", content="Content 1")
-        memory2 = Memory(id="mem_002", content="Content 2")
+        memory1 = Memory(id="mem_001", content="Content 1", user_id="user_001")
+        memory2 = Memory(id="mem_002", content="Content 2", user_id="user_001")
 
         bundle = ContextBundle(
             vector_candidates=[memory1],
@@ -500,9 +514,9 @@ class TestContextBundle:
 
     def test_context_bundle_with_all_context(self):
         """Test context bundle with all context types."""
-        memory1 = Memory(id="mem_001", content="Content 1")
-        memory2 = Memory(id="mem_002", content="Content 2")
-        memory3 = Memory(id="mem_003", content="Content 3")
+        memory1 = Memory(id="mem_001", content="Content 1", user_id="user_001")
+        memory2 = Memory(id="mem_002", content="Content 2", user_id="user_001")
+        memory3 = Memory(id="mem_003", content="Content 3", user_id="user_001")
 
         bundle = ContextBundle(
             vector_candidates=[memory1],

@@ -8,13 +8,14 @@ Provides endpoints for adding, querying, updating, and deleting memories.
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from src.config import Config
 from src.core.factory import EmbedderFactory, GraphStoreFactory, LLMFactory, VectorStoreFactory
 from src.services.memory_engine import MemoryEngine
+from src.utils.exceptions import NotFoundError, SecurityError
 from src.utils.logger import get_logger, setup_logging
 
 # Global engine instance
@@ -27,6 +28,7 @@ class AddMemoryRequest(BaseModel):
     """Request model for adding a memory."""
 
     content: str = Field(..., description="Memory content")
+    user_id: str = Field(..., description="User ID for multi-user isolation")
     metadata: dict[str, Any] | None = Field(default=None, description="Optional metadata")
 
 
@@ -44,6 +46,7 @@ class QueryMemoriesRequest(BaseModel):
     """Request model for querying memories."""
 
     query: str = Field(..., description="Search query")
+    user_id: str = Field(..., description="User ID for multi-user isolation")
     limit: int = Field(default=10, ge=1, le=100, description="Max results")
     similarity_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     filters: dict[str, Any] | None = None
@@ -235,6 +238,7 @@ async def add_memory(request: AddMemoryRequest):
     try:
         memory, extraction = await engine.add_memory(
             content=request.content,
+            user_id=request.user_id,
             metadata=request.metadata or {},
         )
 
@@ -265,6 +269,7 @@ async def query_memories(request: QueryMemoriesRequest):
     try:
         results = await engine.search_similar(
             query=request.query,
+            user_id=request.user_id,
             limit=request.limit,
             score_threshold=request.similarity_threshold,
             filters=request.filters,
@@ -287,7 +292,7 @@ async def query_memories(request: QueryMemoriesRequest):
 
             # Include relationships if requested
             if request.include_relationships:
-                neighbors = await engine.get_neighbors(memory.id, limit=10)
+                neighbors = await engine.get_neighbors(memory.id, request.user_id, limit=10)
                 result_data["relationships"] = {
                     "count": len(neighbors),
                     "edges": [
@@ -310,13 +315,18 @@ async def query_memories(request: QueryMemoriesRequest):
 
 
 @app.get("/memories/{memory_id}")
-async def get_memory(memory_id: str, include_relationships: bool = Query(default=False)):
+async def get_memory(
+    memory_id: str,
+    user_id: str = Query(..., description="User ID for multi-user isolation"),
+    include_relationships: bool = Query(default=False),
+):
     """
     Retrieve a specific memory by ID.
 
     Returns the memory with its full content, metadata, and version information.
     Optionally includes relationship information showing connected memories.
     Access tracking is automatically updated (access_count, last_accessed).
+    Requires user_id to ensure multi-user isolation.
     """
     if not engine:
         raise HTTPException(status_code=503, detail="Engine not initialized")
@@ -325,6 +335,7 @@ async def get_memory(memory_id: str, include_relationships: bool = Query(default
         # Get memory with relationships if requested (single call, no double tracking)
         memory = await engine.get_memory(
             memory_id,
+            user_id=user_id,
             validate=True,
             include_relationships=include_relationships,
             relationship_limit=20,
@@ -368,6 +379,10 @@ async def get_memory(memory_id: str, include_relationships: bool = Query(default
             }
 
         return result
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except SecurityError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
     except HTTPException:
         raise
     except Exception as e:
@@ -376,7 +391,11 @@ async def get_memory(memory_id: str, include_relationships: bool = Query(default
 
 
 @app.put("/memories/{memory_id}", response_model=UpdateMemoryResponse)
-async def update_memory(memory_id: str, request: UpdateMemoryRequest):
+async def update_memory(
+    memory_id: str,
+    user_id: str = Query(..., description="User ID for multi-user isolation"),
+    request: UpdateMemoryRequest = Body(...),
+):
     """
     Update an existing memory with intelligent versioning.
 
@@ -387,6 +406,7 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
     - "preserve": Keeps both as separate memories (for conflicts)
 
     Optionally triggers relationship reindexing for the new/updated memory.
+    Requires user_id to ensure multi-user isolation.
     """
     if not engine:
         raise HTTPException(status_code=503, detail="Engine not initialized")
@@ -394,7 +414,9 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
     try:
         if request.content:
             # Update with LLM-guided versioning
-            updated_memory, evolution = await engine.update_memory(memory_id, request.content)
+            updated_memory, evolution = await engine.update_memory(
+                memory_id, user_id, request.content
+            )
 
             # Get confidence from memory metadata (set during evolution)
             confidence = updated_memory.metadata.get("evolution_confidence", 1.0)
@@ -411,7 +433,7 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
             )
         else:
             # Metadata-only update
-            memory = await engine.update_memory_metadata(memory_id, request.metadata or {})
+            memory = await engine.update_memory_metadata(memory_id, user_id, request.metadata or {})
 
             return UpdateMemoryResponse(
                 memory_id=memory.id,
@@ -421,27 +443,37 @@ async def update_memory(memory_id: str, request: UpdateMemoryRequest):
                 reasoning="User requested metadata-only update",
                 confidence=1.0,
             )
-    except ValueError as e:
+    except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except SecurityError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error updating memory: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.delete("/memories/{memory_id}")
-async def delete_memory(memory_id: str):
+async def delete_memory(
+    memory_id: str,
+    user_id: str = Query(..., description="User ID for multi-user isolation"),
+):
     """
     Delete a memory and its relationships.
 
     Removes the memory from both vector and graph stores, along with
     all associated relationship edges.
+    Requires user_id to ensure multi-user isolation.
     """
     if not engine:
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        await engine.delete_memory(memory_id)
+        await engine.delete_memory(memory_id, user_id)
         return {"id": memory_id, "deleted": True}
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except SecurityError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error deleting memory: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -475,17 +507,18 @@ async def add_document(request: AddDocumentRequest):
 
 # Statistics endpoint
 @app.get("/stats")
-async def get_stats():
+async def get_stats(user_id: str = Query(..., description="User ID for multi-user isolation")):
     """
     Get system statistics.
 
     Returns information about the number of memories, relationships, etc.
+    Statistics are filtered by user_id for multi-user isolation.
     """
     if not engine:
         raise HTTPException(status_code=503, detail="Engine not initialized")
 
     try:
-        stats = await engine.get_statistics()
+        stats = await engine.get_statistics(user_id)
         return stats
     except Exception as e:
         logger.error(f"Error getting stats: {e}")

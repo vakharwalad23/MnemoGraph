@@ -117,8 +117,10 @@ class MultiStageFilter:
             vector_candidates=vector_candidates[:10],
             temporal_context=context_results["temporal"],
             graph_context=context_results["graph"],
-            entity_context=context_results["entity"],
-            conversation_context=context_results["conversation"],
+            entity_context=[],
+            conversation_context=[],
+            # entity_context=context_results["entity"],
+            # conversation_context=context_results["conversation"],
             filtered_candidates=filtered,
         )
 
@@ -138,6 +140,7 @@ class MultiStageFilter:
                 query_embedding=memory.embedding,
                 limit=100,
                 filters={
+                    "user_id": memory.user_id,
                     "status": ["active", "historical"],
                     "created_after": (datetime.now() - timedelta(days=90)).isoformat(),
                 },
@@ -165,16 +168,18 @@ class MultiStageFilter:
         results = await asyncio.gather(
             self._temporal_filter(memory),
             self._graph_filter(memory),
-            self._entity_filter(memory),
-            self._conversation_filter(memory),
+            # self._entity_filter(memory),
+            # self._conversation_filter(memory),
             return_exceptions=True,
         )
 
         return {
             "temporal": results[0] if not isinstance(results[0], Exception) else [],
             "graph": results[1] if not isinstance(results[1], Exception) else [],
-            "entity": results[2] if not isinstance(results[2], Exception) else [],
-            "conversation": results[3] if not isinstance(results[3], Exception) else [],
+            "entity": [],
+            "conversation": [],
+            # "entity": results[2] if not isinstance(results[2], Exception) else [],
+            # "conversation": results[3] if not isinstance(results[3], Exception) else [],
         }
 
     async def _temporal_filter(self, memory: Memory, window_days: int = 30) -> list[Memory]:
@@ -198,6 +203,7 @@ class MultiStageFilter:
                 query_embedding=memory.embedding,
                 limit=20,
                 filters={
+                    "user_id": memory.user_id,
                     "status": ["active"],
                     "created_after": cutoff.isoformat(),
                 },
@@ -224,6 +230,7 @@ class MultiStageFilter:
         try:
             neighbors = await self.memory_store.get_neighbors(
                 memory_id=memory.id,
+                user_id=memory.user_id,
                 depth=depth,
                 relationship_types=[
                     "SIMILAR_TO",
@@ -299,6 +306,7 @@ Return a JSON object with a list of up to 5 key entities.
             conversation_id = memory.metadata["conversation_id"]
 
             results = await self.memory_store.graph_store.query_memories(
+                user_id=memory.user_id,
                 filters={"metadata.conversation_id": conversation_id},
                 order_by="created_at DESC",
                 limit=10,

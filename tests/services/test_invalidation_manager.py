@@ -49,6 +49,7 @@ class TestInvalidationManagerUnit:
             id="recent_mem",
             content="Recent memory",
             type=NodeType.MEMORY,
+            user_id="test_user_001",
             embedding=[0.1] * 768,
             created_at=datetime.now() - timedelta(days=10),
             updated_at=datetime.now(),
@@ -74,6 +75,7 @@ class TestInvalidationManagerUnit:
             id="old_mem",
             content="Old memory",
             type=NodeType.MEMORY,
+            user_id="test_user_001",
             embedding=[0.1] * 768,
             created_at=datetime.now() - timedelta(days=200),
             updated_at=datetime.now(),
@@ -136,13 +138,14 @@ class TestInvalidationManagerNeo4j:
             memory_store=memory_store,
         )
 
-        await memory_store.graph_store.add_node(sample_memory)
+        await memory_store.create_memory(sample_memory)
 
         # Validate
         result = await manager.validate_on_access(sample_memory)
 
         assert result is not None
         assert result.id == sample_memory.id
+        assert result.user_id == sample_memory.user_id
 
     async def test_check_supersession_neo4j(self, mock_llm, memory_store, sample_memories):
         """Test supersession checking with Neo4j."""
@@ -153,12 +156,13 @@ class TestInvalidationManagerNeo4j:
 
         # Add memories
         for mem in sample_memories:
-            await memory_store.graph_store.add_node(mem)
+            await memory_store.create_memory(mem)
 
         new_mem = Memory(
             id="new_mem",
             content="Updated information",
             type=NodeType.MEMORY,
+            user_id=sample_memories[0].user_id,  # Same user for supersession
             embedding=[0.9] * 768,
         )
 
@@ -166,6 +170,9 @@ class TestInvalidationManagerNeo4j:
         superseded = await manager.check_supersession(new_mem, sample_memories[:2])
 
         assert isinstance(superseded, list)
+        # Verify all superseded memories belong to the same user
+        for mem in superseded:
+            assert mem.user_id == new_mem.user_id
 
 
 @pytest.mark.slow

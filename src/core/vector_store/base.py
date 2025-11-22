@@ -145,3 +145,37 @@ class VectorStore(ABC):
     async def close(self) -> None:
         """Close the connection to the vector store."""
         pass
+
+    # INTERNAL METHODS FOR BACKGROUND OPERATIONS
+    # These methods bypass user_id filtering and should ONLY be used by internal services
+    # (e.g., background workers, admin operations). They maintain security by ensuring
+    # all returned memories still have valid user_id values.
+
+    async def _search_by_payload_all_users(
+        self, filter: dict[str, Any] | None = None, limit: int = 100, order_by: str | None = None
+    ) -> list[Memory]:
+        """
+        INTERNAL: Search memories across all users by payload filters.
+
+        WARNING: This method bypasses user_id filtering and should ONLY be used
+        by internal services (background workers, admin operations).
+
+        Note: This is a concrete method with a default implementation that raises
+        NotImplementedError. Subclasses should override it if they need to support
+        background operations across all users.
+
+        Args:
+            filter: Optional payload filter conditions (user_id will be ignored)
+            limit: Maximum results
+            order_by: Sort order (e.g., "created_at ASC") - implementation dependent
+
+        Returns:
+            List of memories from all users
+
+        Raises:
+            NotImplementedError: If not implemented by subclass
+        """
+        raise NotImplementedError(
+            "_search_by_payload_all_users is not implemented. "
+            "This method is for internal use only (background workers, admin operations)."
+        )
