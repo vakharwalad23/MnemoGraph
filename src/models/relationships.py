@@ -12,38 +12,45 @@ from src.models.memory import Memory
 
 
 class RelationshipType(str, Enum):
-    """Types of relationships between memories."""
+    """Types of relationships between nodes in the knowledge graph."""
 
-    # Semantic
+    # Semantic (Memory ↔ Memory)
     SIMILAR_TO = "SIMILAR_TO"
     REFERENCES = "REFERENCES"
 
-    # Temporal/Causal
+    # Temporal/Causal (Memory ↔ Memory)
     PRECEDES = "PRECEDES"
     FOLLOWS = "FOLLOWS"
     UPDATES = "UPDATES"
 
-    # Hierarchical
+    # Hierarchical (Memory ↔ Memory)
     PART_OF = "PART_OF"
     BELONGS_TO = "BELONGS_TO"
     PARENT_OF = "PARENT_OF"
 
-    # Logical
+    # Logical (Memory ↔ Memory)
     CONTRADICTS = "CONTRADICTS"
     SUPPORTS = "SUPPORTS"
     REQUIRES = "REQUIRES"
     DEPENDS_ON = "DEPENDS_ON"
 
-    # Synthesis
+    # Synthesis (Memory ↔ Memory)
     DERIVED_FROM = "DERIVED_FROM"
     SYNTHESIZES = "SYNTHESIZES"
 
-    # Entity
+    # Entity (Memory ↔ Memory)
     CO_OCCURS = "CO_OCCURS"
     MENTIONS = "MENTIONS"
 
-    # Conversation
+    # Conversation (Memory ↔ Memory)
     RESPONDS_TO = "RESPONDS_TO"
+
+    # Source Linkage (Note/Document → Memory)
+    HAS_MEMORY = "HAS_MEMORY"  # Note/Document to extracted Memory
+
+    # Document Structure (Document → Chunk, Chunk → Chunk)
+    HAS_CHUNK = "HAS_CHUNK"  # Document to its Chunks
+    NEXT_CHUNK = "NEXT_CHUNK"  # Sequential chunk ordering
 
 
 class Edge(BaseModel):

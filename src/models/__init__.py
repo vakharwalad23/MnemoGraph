@@ -1,20 +1,36 @@
 """
 Data models for MnemoGraph.
 
+Three-Layer Architecture:
+1. Source Content Layer (Notes, Documents, Chunks)
+2. Memory Layer (extracted semantic memories)
+3. Relationship Layer (connections between memories)
+
 Core models:
-- Memory: Main memory node with versioning
-- NodeType, MemoryStatus: Enums for memory lifecycle
-- VersionChain, MemoryEvolution: Version tracking
-- InvalidationResult: Invalidation check results
+- Note: Small source content (< 2000 tokens)
+- Document, Chunk: Large source content with chunking
+- Memory: Extracted semantic memory with source linkage
+- NodeType, SourceType: Node and source type enums
+- MemoryStatus, ContentStatus: Lifecycle status enums
 - RelationshipType, Edge: Relationship models
 - RelationshipBundle, ContextBundle: Extraction results
 """
 
-from src.models.memory import Memory, MemoryStatus, NodeType
+from src.models.document import Chunk, Document
+from src.models.memory import (
+    ContentStatus,
+    Memory,
+    MemoryStatus,
+    NodeType,
+    SourceType,
+    compute_content_hash,
+)
+from src.models.note import Note
 from src.models.relationships import (
     ContextBundle,
     DerivedInsight,
     Edge,
+    Relationship,
     RelationshipBundle,
     RelationshipType,
 )
@@ -27,10 +43,17 @@ from src.models.version import (
 )
 
 __all__ = [
+    # Source Content models
+    "Note",
+    "Document",
+    "Chunk",
     # Memory models
     "Memory",
     "NodeType",
+    "SourceType",
     "MemoryStatus",
+    "ContentStatus",
+    "compute_content_hash",
     # Version models
     "MemoryEvolution",
     "VersionChange",
@@ -40,6 +63,7 @@ __all__ = [
     # Relationship models
     "RelationshipType",
     "Edge",
+    "Relationship",
     "RelationshipBundle",
     "DerivedInsight",
     "ContextBundle",

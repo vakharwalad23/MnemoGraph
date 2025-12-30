@@ -2,6 +2,7 @@
 Memory model with versioning and lifecycle tracking.
 """
 
+import hashlib
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -10,14 +11,27 @@ from pydantic import BaseModel, Field
 
 
 class NodeType(str, Enum):
-    """Types of nodes in the memory graph."""
+    """Types of nodes in the knowledge graph."""
 
-    MEMORY = "MEMORY"
-    DERIVED = "DERIVED"
-    TOPIC = "TOPIC"
-    ENTITY = "ENTITY"
+    # Source Content Types
+    NOTE = "NOTE"  # Small source content (< 2000 tokens)
+    DOCUMENT = "DOCUMENT"  # Large source content (>= 2000 tokens)
+    CHUNK = "CHUNK"  # Document chunk
+
+    # Extracted Types
+    MEMORY = "MEMORY"  # Extracted semantic memory
+    DERIVED = "DERIVED"  # LLM-synthesized insight
+
+    # Entity Types (future)
+    TOPIC = "TOPIC"  # Topic/category
+    ENTITY = "ENTITY"  # Named entity (person, place, concept)
+
+
+class SourceType(str, Enum):
+    """Source content type for extracted memories."""
+
+    NOTE = "NOTE"
     DOCUMENT = "DOCUMENT"
-    CHUNK = "CHUNK"
 
 
 class MemoryStatus(str, Enum):
@@ -29,56 +43,80 @@ class MemoryStatus(str, Enum):
     INVALIDATED = "invalidated"
 
 
+class ContentStatus(str, Enum):
+    """Status of source content (Notes, Documents)."""
+
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+    DELETED = "deleted"
+
+
 class Memory(BaseModel):
     """
-    Memory node with full lifecycle tracking.
+    Extracted semantic memory from source content (Notes/Documents).
+
+    Memories are the atomic units of knowledge extracted from source content.
+    They participate in relationship extraction and semantic search.
 
     Features:
+    - Source Linkage: Every memory links back to its source (Note or Document)
     - Versioning: Track evolution over time
     - Status management: Active, historical, superseded, invalidated
     - Temporal tracking: Creation, updates, validity windows
     - Access patterns: Track usage for intelligent invalidation
+    - Deduplication: content_hash for detecting duplicates
 
     Storage Architecture:
-    - Vector Store: Source of truth - stores ALL fields
-    - Graph Store: Minimal nodes - stores only (id, content_preview, type, status, version info)
-    When to use which store:
-    - For full memory data: Use MemoryStore.get_memory() -> fetches from vector store
-    - For graph traversal: Graph store provides minimal data for relationships
-    - For search: Vector store provides semantic search with full data
+    - Vector Store: Source of truth - stores ALL fields including full content
+    - Graph Store: Minimal nodes - stores only (id, content_preview, type, status, source info)
     """
 
     # Core identity
-    id: str
-    content: str
-    type: NodeType = NodeType.MEMORY
-    embedding: list[float] = Field(default_factory=list)
+    id: str = Field(..., description="Unique memory ID (mem_xxx)")
+    content: str = Field(..., description="Semantic memory content")
+    content_hash: str = Field(default="", description="SHA256 hash for deduplication")
+    type: NodeType = Field(default=NodeType.MEMORY, description="Node type")
+    embedding: list[float] = Field(default_factory=list, description="Vector embedding")
 
     # Multi-user isolation
-    user_id: str
+    user_id: str = Field(..., description="Owner user ID")
+
+    # Source linkage (inks memory to its source)
+    source_id: str | None = Field(
+        default=None,
+        description="Source note_id or document_id (None for legacy memories)",
+    )
+    source_type: SourceType | None = Field(
+        default=None,
+        description="Source type: NOTE or DOCUMENT (None for legacy memories)",
+    )
+    source_chunk_id: str | None = Field(
+        default=None,
+        description="Specific chunk ID if extracted from a document chunk",
+    )
 
     # Versioning
-    version: int = 1
-    parent_version: str | None = None
-    valid_from: datetime = Field(default_factory=datetime.now)
-    valid_until: datetime | None = None
+    version: int = Field(default=1, description="Version number")
+    parent_version: str | None = Field(default=None, description="Parent version ID")
+    valid_from: datetime = Field(default_factory=datetime.now, description="Valid from timestamp")
+    valid_until: datetime | None = Field(default=None, description="Valid until timestamp")
 
     # Status
-    status: MemoryStatus = MemoryStatus.ACTIVE
-    superseded_by: str | None = None
-    invalidation_reason: str | None = None
+    status: MemoryStatus = Field(default=MemoryStatus.ACTIVE, description="Lifecycle status")
+    superseded_by: str | None = Field(default=None, description="ID of superseding memory")
+    invalidation_reason: str | None = Field(default=None, description="Reason for invalidation")
 
     # Metadata
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    confidence: float = 1.0
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Confidence score")
 
     # Access tracking
-    access_count: int = 0
-    last_accessed: datetime | None = None
+    access_count: int = Field(default=0, ge=0, description="Number of times accessed")
+    last_accessed: datetime | None = Field(default=None, description="Last access timestamp")
 
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=datetime.now, description="Creation timestamp")
+    updated_at: datetime = Field(default_factory=datetime.now, description="Last update timestamp")
 
     class Config:
         """Pydantic configuration."""
@@ -132,3 +170,21 @@ class Memory(BaseModel):
         if self.last_accessed is None:
             return None
         return (datetime.now() - self.last_accessed).days
+
+
+def compute_content_hash(content: str) -> str:
+    """
+    Compute SHA256 hash of content for deduplication.
+
+    The hash is prefixed with "sha256:" for easy identification of the algorithm used.
+    Content is normalized (stripped) before hashing to avoid whitespace-only differences.
+
+    Args:
+        content: Text content to hash
+
+    Returns:
+        Hash string in format "sha256:hexdigest"
+    """
+    normalized = content.strip()
+    hash_bytes = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"sha256:{hash_bytes}"
