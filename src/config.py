@@ -97,6 +97,40 @@ class Neo4jConfig(BaseModel):
     database: str = "neo4j"
 
 
+class TokenizerConfig(BaseModel):
+    """Token counting configuration."""
+
+    provider: str = Field(
+        default="tiktoken",
+        description="Token counting provider: 'tiktoken' or 'approximate'",
+    )
+    model: str = Field(
+        default="cl100k_base",
+        description="Tiktoken encoding model (cl100k_base for GPT-4/3.5)",
+    )
+    chars_per_token: float = Field(
+        default=4.0,
+        gt=0,
+        description="Average characters per token for approximation",
+    )
+    document_threshold: int = Field(
+        default=2000,
+        gt=0,
+        description="Token threshold for Note vs Document classification",
+    )
+    async_threshold: int = Field(
+        default=10000,
+        gt=0,
+        description="Token threshold for async processing",
+    )
+
+
+class ContentConfig(BaseModel):
+    """Content ingestion configuration (Notes and Documents)."""
+
+    tokenizer: TokenizerConfig = Field(default_factory=TokenizerConfig)
+
+
 class Config(BaseModel):
     """Main configuration."""
 
@@ -104,6 +138,7 @@ class Config(BaseModel):
     embedder: EmbedderConfig = Field(default_factory=EmbedderConfig)
     llm_relationships: LLMRelationshipConfig = Field(default_factory=LLMRelationshipConfig)
     memory_evolution: MemoryEvolutionConfig = Field(default_factory=MemoryEvolutionConfig)
+    content: ContentConfig = Field(default_factory=ContentConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     qdrant: QdrantConfig = Field(default_factory=QdrantConfig)
     neo4j: Neo4jConfig = Field(default_factory=Neo4jConfig)
@@ -139,6 +174,10 @@ class Config(BaseModel):
             MNEMO_NEO4J_PASSWORD: Neo4j password
             MNEMO_QDRANT_URL: Qdrant URL
             MNEMO_QDRANT_COLLECTION: Qdrant collection name
+            MNEMO_TOKENIZER_PROVIDER: Token counter provider (tiktoken, approximate)
+            MNEMO_TOKENIZER_MODEL: Tiktoken model (cl100k_base)
+            MNEMO_DOCUMENT_THRESHOLD: Token threshold for documents (2000)
+            MNEMO_ASYNC_THRESHOLD: Token threshold for async processing (10000)
         """
         # Load .env file if provided or exists
         if env_file:
@@ -207,6 +246,15 @@ class Config(BaseModel):
                 file_retention=get_env("MNEMO_LOG_FILE_RETENTION", "7 days"),
                 compression=get_env("MNEMO_LOG_COMPRESSION", "zip"),
                 serialize=get_env("MNEMO_LOG_SERIALIZE", True),
+            ),
+            content=ContentConfig(
+                tokenizer=TokenizerConfig(
+                    provider=get_env("MNEMO_TOKENIZER_PROVIDER", "tiktoken"),
+                    model=get_env("MNEMO_TOKENIZER_MODEL", "cl100k_base"),
+                    chars_per_token=get_env("MNEMO_CHARS_PER_TOKEN", 4.0),
+                    document_threshold=get_env("MNEMO_DOCUMENT_THRESHOLD", 2000),
+                    async_threshold=get_env("MNEMO_ASYNC_THRESHOLD", 10000),
+                ),
             ),
         )
 
@@ -278,6 +326,8 @@ class Config(BaseModel):
             final_dict["qdrant"] = env_config.qdrant.model_dump()
         if env_config.logging != default.logging:
             final_dict["logging"] = env_config.logging.model_dump()
+        if env_config.content != default.content:
+            final_dict["content"] = env_config.content.model_dump()
 
         # Also check top-level fields
         if env_config.graph_backend != default.graph_backend:
