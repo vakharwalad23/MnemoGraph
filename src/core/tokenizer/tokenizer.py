@@ -23,9 +23,7 @@ class Tokenizer:
     """
     Universal token counter with content type detection.
 
-    Provides accurate token counting using tiktoken (OpenAI's tokenizer)
-    with a fast character-based approximation fallback. Designed to be
-    synchronous since tiktoken is fast (~1ms for 10k tokens).
+    Provides accurate token counting using tiktoken.
 
     Usage:
         tokenizer = Tokenizer()
