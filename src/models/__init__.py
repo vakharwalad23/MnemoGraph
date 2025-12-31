@@ -14,9 +14,11 @@ Core models:
 - MemoryStatus, ContentStatus: Lifecycle status enums
 - RelationshipType, Edge: Relationship models
 - RelationshipBundle, ContextBundle: Extraction results
+- ContentIngestionResult, IngestionStatus: Ingestion results
 """
 
 from src.models.document import Chunk, Document
+from src.models.ingestion import ContentIngestionResult, IngestionStatus
 from src.models.memory import (
     ContentStatus,
     Memory,
@@ -54,6 +56,9 @@ __all__ = [
     "MemoryStatus",
     "ContentStatus",
     "compute_content_hash",
+    # Ingestion models
+    "ContentIngestionResult",
+    "IngestionStatus",
     # Version models
     "MemoryEvolution",
     "VersionChange",

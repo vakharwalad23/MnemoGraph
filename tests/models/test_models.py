@@ -17,11 +17,13 @@ from pydantic import ValidationError
 
 from src.models import (
     Chunk,
+    ContentIngestionResult,
     ContentStatus,
     ContextBundle,
     DerivedInsight,
     Document,
     Edge,
+    IngestionStatus,
     InvalidationResult,
     InvalidationStatus,
     Memory,
@@ -1120,3 +1122,126 @@ class TestComputeContentHash:
 
         assert hash_result.startswith("sha256:")
         assert len(hash_result) == 71
+
+
+class TestContentIngestionResult:
+    """Tests for ContentIngestionResult model."""
+
+    def test_completed_result(self):
+        """Test completed ingestion result."""
+        result = ContentIngestionResult(
+            source_id="note_abc123",
+            source_type=SourceType.NOTE,
+            status=IngestionStatus.COMPLETED,
+            memory_ids=["mem_def456"],
+            relationship_count=5,
+            token_count=100,
+            processing_time_ms=250.0,
+        )
+
+        assert result.source_id == "note_abc123"
+        assert result.source_type == SourceType.NOTE
+        assert result.status == IngestionStatus.COMPLETED
+        assert result.memory_ids == ["mem_def456"]
+        assert result.relationship_count == 5
+        assert result.token_count == 100
+        assert result.processing_time_ms == 250.0
+        assert result.chunk_count == 0
+        assert result.job_id is None
+        assert result.message is None
+
+    def test_queued_result(self):
+        """Test queued ingestion result for async processing."""
+        result = ContentIngestionResult(
+            source_id="doc_xyz789",
+            source_type=SourceType.DOCUMENT,
+            status=IngestionStatus.QUEUED,
+            token_count=15000,
+            job_id="job_abc123",
+            message="Queued for async processing",
+        )
+
+        assert result.status == IngestionStatus.QUEUED
+        assert result.source_type == SourceType.DOCUMENT
+        assert result.job_id == "job_abc123"
+
+    def test_duplicate_result(self):
+        """Test duplicate content detection result."""
+        result = ContentIngestionResult(
+            source_id="note_existing",
+            source_type=SourceType.NOTE,
+            status=IngestionStatus.DUPLICATE,
+            message="Content already exists",
+        )
+
+        assert result.status == IngestionStatus.DUPLICATE
+        assert result.source_id == "note_existing"
+
+    def test_failed_result(self):
+        """Test failed ingestion result."""
+        result = ContentIngestionResult(
+            source_type=SourceType.NOTE,
+            status=IngestionStatus.FAILED,
+            token_count=50,
+            message="Embedding generation failed",
+        )
+
+        assert result.status == IngestionStatus.FAILED
+        assert result.source_id == ""
+        assert result.message == "Embedding generation failed"
+
+    def test_not_implemented_result(self):
+        """Test not implemented result for Phase 1 documents."""
+        result = ContentIngestionResult(
+            source_type=SourceType.DOCUMENT,
+            status=IngestionStatus.NOT_IMPLEMENTED,
+            token_count=5000,
+            message="Document ingestion requires Phase 2",
+        )
+
+        assert result.status == IngestionStatus.NOT_IMPLEMENTED
+        assert result.source_type == SourceType.DOCUMENT
+
+    def test_result_with_chunks(self):
+        """Test result with chunk information (future document support)."""
+        result = ContentIngestionResult(
+            source_id="doc_chunked",
+            source_type=SourceType.DOCUMENT,
+            status=IngestionStatus.COMPLETED,
+            memory_ids=["mem_1", "mem_2", "mem_3"],
+            chunk_count=10,
+            token_count=8000,
+        )
+
+        assert result.chunk_count == 10
+        assert len(result.memory_ids) == 3
+
+
+class TestIngestionStatusEnum:
+    """Tests for IngestionStatus enum."""
+
+    def test_completed_status(self):
+        """Test COMPLETED status."""
+        assert IngestionStatus.COMPLETED == "completed"
+
+    def test_queued_status(self):
+        """Test QUEUED status."""
+        assert IngestionStatus.QUEUED == "queued"
+
+    def test_duplicate_status(self):
+        """Test DUPLICATE status."""
+        assert IngestionStatus.DUPLICATE == "duplicate"
+
+    def test_failed_status(self):
+        """Test FAILED status."""
+        assert IngestionStatus.FAILED == "failed"
+
+    def test_not_implemented_status(self):
+        """Test NOT_IMPLEMENTED status."""
+        assert IngestionStatus.NOT_IMPLEMENTED == "not_implemented"
+
+    def test_all_statuses(self):
+        """Test all expected statuses are defined."""
+        expected = ["completed", "queued", "duplicate", "failed", "not_implemented"]
+        for status in expected:
+            assert IngestionStatus(status) == status
