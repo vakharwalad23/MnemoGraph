@@ -24,7 +24,7 @@ from src.models.version import InvalidationResult, MemoryEvolution, VersionChain
 from src.services.invalidation_manager import InvalidationManager
 from src.services.llm_relationship_engine import LLMRelationshipEngine
 from src.services.memory_evolution import MemoryEvolutionService
-from src.utils.exceptions import (
+from src.utils import (
     EmbeddingError,
     GraphStoreError,
     MemoryError,
@@ -32,8 +32,9 @@ from src.utils.exceptions import (
     SecurityError,
     ValidationError,
     VectorStoreError,
+    generate_memory_id,
+    get_logger,
 )
-from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -163,7 +164,7 @@ class MemoryEngine:
         try:
             # Create memory object with user_id as explicit parameter
             memory = Memory(
-                id=self._generate_id(),
+                id=generate_memory_id(),
                 content=content,
                 type=memory_type,
                 embedding=embedding,
@@ -790,11 +791,3 @@ class MemoryEngine:
         await self.embedder.close()
 
         logger.info("Memory Engine shutdown complete")
-
-    # HELPER METHODS
-
-    def _generate_id(self) -> str:
-        """Generate unique memory ID."""
-        from uuid import uuid4
-
-        return f"mem_{uuid4().hex[:12]}"
